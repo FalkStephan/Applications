@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}Feiertage importieren{% endblock %}
+
+{% block content %}
+        <h1>Feiertage importieren</h1>
+        <p>Wählen Sie eine CSV-Datei aus, um Feiertage zu importieren. Das erwartete Format pro Zeile ist: **Datum (JJJJ-MM-TT),Beschreibung**.</p>
+        <p>Beispiel:</p>
+        <pre>
+2025-01-01,Neujahr
+2025-04-18,Karfreitag
+2025-05-01,Tag der Arbeit</pre>
+
+        <form method="POST" enctype="multipart/form-data">
+            <label for="file">CSV-Datei auswählen:</label>
+            <input type="file" id="file" name="file" accept=".csv" required>
+            <button type="submit">Importieren</button>
+        </form>
+        <p><a href="{{ url_for('holidays') }}">Zurück zu Feiertagen</a></p>
+{% endblock %}

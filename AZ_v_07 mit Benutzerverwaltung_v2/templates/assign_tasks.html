@@ -1,0 +1,477 @@
+{% extends "base.html" %}
+
+{% block title %}Aufgaben zuordnen{% endblock %}
+
+{% block head_extra_style %}
+    <style>
+        /* Zusätzliche Stile für Suchfeld und Sortier-Header */
+        .search-container {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .search-container input, .search-container select { /* Auch für Select-Feld */
+            padding: 8px;
+            width: 50%;
+            max-width: 400px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+            margin-right: 10px; /* Abstand zwischen Suchfeld und Filter */
+        }
+        .sortable-header {
+            cursor: pointer;
+            position: relative;
+            padding-right: 20px; /* Platz für das Sortiersymbol */
+        }
+        .sortable-header::after {
+            content: '';
+            display: inline-block;
+            position: absolute;
+            right: 5px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            vertical-align: middle;
+        }
+        .sortable-header.asc::after {
+            border-bottom: 5px solid #000;
+        }
+        .sortable-header.desc::after {
+            border-top: 5px solid #000;
+        }
+        .sortable-header:not(.asc):not(.desc):hover::after {
+            border-bottom: 5px solid #aaa; /* Lighter indicator for hover */
+        }
+
+        /* Zusätzliche Styles für die Kreuztabelle */
+        .cross-table select {
+            width: 100%;
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            margin-bottom: 5px; /* Abstand zum Input-Feld */
+        }
+        .cross-table input[type="number"] {
+            width: 100%;
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+            text-align: right; /* Zahlen rechtsbündig */
+        }
+        .cross-table td {
+            vertical-align: top; /* Inhalte oben ausrichten */
+        }
+
+        /* Farbliche Hervorhebung für die Summen */
+        .sum-red {
+            color: white;
+            background-color: #e74c3c; /* Dunkles Rot */
+            font-weight: bold;
+        }
+        .sum-green {
+            color: white;
+            background-color: #2ecc71; /* Dunkles Grün */
+            font-weight: bold;
+        }
+        .sum-yellow {
+            color: black;
+            background-color: #f1c40f; /* Dunkles Gelb */
+            font-weight: bold;
+        }
+
+        /* Styles für den PDF Export Button */
+        .export-buttons {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .export-buttons .button {
+            background-color: #8e44ad; /* Lila für Export */
+        }
+        .export-buttons .button:hover {
+            background-color: #6c3483;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+        <h1>Aufgaben den Mitarbeitern zuordnen</h1>
+
+        <form method="POST">
+            <h2>Zuordnungen bearbeiten:</h2>
+            <p>Wählen Sie pro Mitarbeiter und Aufgabe die entsprechende Verantwortlichkeit aus und geben Sie den geschätzten Prozentsatz der Arbeitszeit an.</p>
+            <table class="cross-table">
+                <thead>
+                    <tr>
+                        <th>Mitarbeiter</th>
+                        {% for task in tasks %}
+                            <th>{{ task.name }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for employee in employees %}
+                        <tr>
+                            <td>{{ employee.name }}</td>
+                            {% for task in tasks %}
+                                <td>
+                                    <select name="assignment_type_{{ employee.id }}_{{ task.id }}" 
+                                            onchange="togglePercentageInput({{ employee.id }}, {{ task.id }}, this.value)">
+                                        <option value="">Nicht zugeordnet</option> 
+                                        {% for key, description in assignment_types.items() %}
+                                            <option value="{{ key }}" 
+                                                    {% if assigned_tasks_data[employee.id].get(task.id, {}).get('type') == key %}selected{% endif %}>
+                                                {{ description }} ({{ key }})
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                    <input type="number" 
+                                           id="percentage_input_{{ employee.id }}_{{ task.id }}"
+                                           name="percentage_{{ employee.id }}_{{ task.id }}" 
+                                           min="0" max="100" step="0.1"
+                                           value="{{ assigned_tasks_data[employee.id].get(task.id, {}).get('percentage', '') }}"
+                                           placeholder="%"
+                                           style="{% if not assigned_tasks_data[employee.id].get(task.id, {}).get('type') %}display:none;{% endif %}"
+                                           >
+                                </td>
+                            {% endfor %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            
+            <button type="submit" class="button">Zuordnungen speichern</button>
+        </form>
+
+        <hr>
+
+        <h2>Aktuelle Zuordnungen (Kreuztabelle Ansicht)</h2>
+        <div class="search-container">
+            <input type="text" id="assignmentSearch" onkeyup="filterAssignmentTable()" placeholder="Suchen nach Mitarbeiter oder Aufgabe...">
+            {# Filter für Aufgaben #}
+            <select id="taskFilter" onchange="filterAssignmentTable()">
+                <option value="">Alle Aufgaben</option>
+                {% for task in tasks %}
+                    <option value="{{ task.id }}">{{ task.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <table class="cross-table" id="assignmentOverviewTable">
+            <thead>
+                <tr>
+                    <th class="sortable-header" data-column="employee">Mitarbeiter</th>
+                    {% for task in tasks %}
+                        <th class="sortable-header task-column" data-task-id="{{ task.id }}" data-column="task_{{ task.id }}">{{ task.name }}</th>
+                    {% endfor %}
+                    <th class="sortable-header" data-column="total_percentage" data-column-type="number">Gesamt %</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for employee in employees %}
+                    <tr>
+                        <td class="employee-name-cell">{{ employee.name }}</td>
+                        {% for task in tasks %}
+                            {% set assignment_info = assigned_tasks_data[employee.id].get(task.id, {}) %}
+                            {% set assignment_key = assignment_info.get('type') %}
+                            {% set percentage_val = assignment_info.get('percentage') %}
+                            <td class="task-cell task-{{ task.id }}" data-sort-value="{{ assignment_key }}_{{ percentage_val | default(0) }}"
+                                class="{% if assignment_key %}assigned{% else %}not-assigned{% endif %}">
+                                {% if assignment_key %}
+                                    {{ assignment_types[assignment_key] }} ({{ assignment_key }})<br>
+                                    {% if percentage_val is not none %}
+                                        {{ "%.1f" | format(percentage_val) }}%
+                                    {% endif %}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                        {% endfor %}
+                        {% set total_percentage = total_percentages_per_employee.get(employee.id, 0.0) %} 
+                        {% set sum_class = '' %}
+                        {% if total_percentage >= settings.red_threshold %}
+                            {% set sum_class = 'sum-red' %}
+                        {% elif total_percentage >= settings.green_min_threshold %}
+                            {% set sum_class = 'sum-green' %}
+                        {% else %}
+                            {% set sum_class = 'sum-yellow' %}
+                        {% endif %}
+                        <td class="{{ sum_class }}" data-sort-value="{{ total_percentage }}">
+                            {{ "%.1f" | format(total_percentage) }}%
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        <div class="export-buttons">
+            <button id="exportPdfButton" class="button">als PDF exportieren</button>
+        </div>
+
+        <p><a href="{{ url_for('index') }}">Zurück zur Startseite</a></p>
+
+{% endblock %}
+
+{% block extra_script %}
+    {# CDN Links für html2canvas und jsPDF #}
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <script>
+        // JavaScript for showing/hiding percentage input based on assignment type
+        function togglePercentageInput(employeeId, taskId, selectedValue) {
+            const percentageInput = document.getElementById(`percentage_input_${employeeId}_${taskId}`);
+            if (selectedValue === '') {
+                percentageInput.style.display = 'none';
+                percentageInput.value = ''; // Wert zurücksetzen, wenn Zuordnung entfernt wird
+            } else {
+                percentageInput.style.display = 'block';
+            }
+        }
+
+        // JavaScript for sorting and filtering the overview table
+        let currentSortColumnOverview = null;
+        let currentSortDirectionOverview = 'asc';
+
+        function filterAssignmentTable() {
+            const textFilterInput = document.getElementById('assignmentSearch');
+            const textFilter = textFilterInput.value.toLowerCase();
+            const taskFilterSelect = document.getElementById('taskFilter');
+            const selectedTaskId = taskFilterSelect.value; // ID der ausgewählten Aufgabe oder "" für alle
+
+            const table = document.getElementById('assignmentOverviewTable');
+            const headerRow = table.querySelector('thead tr');
+            const taskHeaders = headerRow.querySelectorAll('.task-column'); // Aufgaben-Header
+            const totalPercentageHeader = headerRow.querySelector('[data-column="total_percentage"]'); // Gesamt % Header
+
+            const tbody = table.querySelector('tbody');
+            const rows = tbody.getElementsByTagName('tr');
+
+            // Zuerst alle Aufgaben-Spalten und die Gesamt % Spalte wieder sichtbar machen
+            taskHeaders.forEach(th => th.style.display = '');
+            totalPercentageHeader.style.display = '';
+            // Mitarbeiter-Spalte (erste Spalte)
+            headerRow.querySelector('.sortable-header[data-column="employee"]').style.display = '';
+
+
+            // Alle Zellen in den Aufgaben-Spalten und der Gesamt % Spalte wieder sichtbar machen
+            Array.from(rows).forEach(row => {
+                const cells = row.getElementsByTagName('td');
+                // Mitarbeitername-Zelle (erste Zelle)
+                cells[0].style.display = '';
+                // Aufgaben-Zellen
+                for (let i = 1; i <= taskHeaders.length; i++) { // Startet bei 1, da 0 der Mitarbeitername ist
+                    cells[i].style.display = '';
+                }
+                // Gesamt % Zelle (letzte Zelle)
+                cells[cells.length - 1].style.display = '';
+            });
+
+
+            // Filterung basierend auf der ausgewählten Aufgabe
+            if (selectedTaskId !== "") {
+                // Spalten ausblenden, die nicht der ausgewählten Aufgabe entsprechen
+                taskHeaders.forEach((th, index) => {
+                    if (th.dataset.taskId !== selectedTaskId) {
+                        th.style.display = 'none'; // Header ausblenden
+                    }
+                });
+                totalPercentageHeader.style.display = 'none'; // Gesamt % Spalte ausblenden
+                headerRow.querySelector('.sortable-header[data-column="employee"]').style.display = ''; // Mitarbeiter-Header immer sichtbar
+
+                Array.from(rows).forEach(row => {
+                    let employeeHasTask = false;
+                    const cells = row.getElementsByTagName('td');
+                    // Mitarbeitername-Zelle (erste Zelle)
+                    cells[0].style.display = '';
+
+                    // Aufgaben-Zellen ausblenden, die nicht der ausgewählten Aufgabe entsprechen
+                    for (let i = 1; i <= taskHeaders.length; i++) {
+                        const currentTaskId = taskHeaders[i-1].dataset.taskId; // taskId aus dem Header holen
+                        if (currentTaskId !== selectedTaskId) {
+                            cells[i].style.display = 'none';
+                        } else {
+                            cells[i].style.display = ''; // Sicherstellen, dass die ausgewählte Spalte sichtbar ist
+                            // Prüfen, ob der Mitarbeiter die ausgewählte Aufgabe zugeordnet hat
+                            if (cells[i].getAttribute('data-sort-value') !== '_0') { // Wenn nicht "Nicht zugeordnet"
+                                employeeHasTask = true;
+                            }
+                        }
+                    }
+                    cells[cells.length - 1].style.display = 'none'; // Gesamt % Zelle ausblenden
+
+                    // Zeile (Mitarbeiter) ausblenden, wenn die ausgewählte Aufgabe nicht zugeordnet ist
+                    if (selectedTaskId !== "") {
+                        row.style.display = employeeHasTask ? '' : 'none';
+                    }
+                });
+            } else {
+                // Wenn "Alle Aufgaben" ausgewählt ist, zeige alle Spalten und Zeilen (vor Textfilter)
+                Array.from(rows).forEach(row => row.style.display = '');
+            }
+
+            // Textfilter anwenden (auf die jetzt sichtbaren oder alle Zeilen)
+            Array.from(rows).forEach(row => {
+                if (row.style.display === 'none' && selectedTaskId !== "") { // Wenn schon durch Aufgabenfilter ausgeblendet
+                    return; // Überspringe diese Zeile
+                }
+
+                let rowVisibleByTextFilter = false;
+                const cells = row.getElementsByTagName('td');
+                // Durchsuche nur die sichtbaren Zellen für den Textfilter
+                for (let j = 0; j < cells.length; j++) {
+                    if (cells[j].style.display !== 'none') { // Nur sichtbare Zellen prüfen
+                        const cellText = cells[j].textContent || cells[j].innerText;
+                        if (cellText.toLowerCase().indexOf(textFilter) > -1) {
+                            rowVisibleByTextFilter = true;
+                            break;
+                        }
+                    }
+                }
+                row.style.display = rowVisibleByTextFilter ? '' : 'none';
+            });
+        }
+
+        function sortAssignmentTable(columnIndex) {
+            const table = document.getElementById('assignmentOverviewTable');
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.rows);
+            const header = table.getElementsByTagName('th')[columnIndex];
+
+            document.querySelectorAll('#assignmentOverviewTable .sortable-header').forEach(th => {
+                th.classList.remove('asc', 'desc');
+            });
+
+            if (currentSortColumnOverview === columnIndex) {
+                currentSortDirectionOverview = (currentSortDirectionOverview === 'asc') ? 'desc' : 'asc';
+            } else {
+                currentSortColumnOverview = columnIndex;
+                currentSortDirectionOverview = 'asc';
+            }
+
+            header.classList.add(currentSortDirectionOverview);
+
+            rows.sort((rowA, rowB) => {
+                let cellA, cellB;
+
+                cellA = rowA.cells[columnIndex].getAttribute('data-sort-value');
+                cellB = rowB.cells[columnIndex].getAttribute('data-sort-value');
+
+                const isTotalPercentageColumn = (columnIndex === table.rows[0].cells.length - 1);
+
+                if (isTotalPercentageColumn) {
+                    cellA = parseFloat(cellA);
+                    cellB = parseFloat(cellB);
+                } else {
+                    cellA = cellA.toLowerCase();
+                    cellB = cellB.toLowerCase();
+                }
+
+                let comparison = 0;
+                if (cellA > cellB) {
+                    comparison = 1;
+                } else if (cellA < cellB) {
+                    comparison = -1;
+                }
+
+                return currentSortDirectionOverview === 'asc' ? comparison : -comparison;
+            });
+
+            rows.forEach(row => tbody.appendChild(row));
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const headers = document.querySelectorAll('#assignmentOverviewTable .sortable-header');
+            headers.forEach((header, index) => {
+                header.addEventListener('click', () => {
+                    sortAssignmentTable(index);
+                });
+            });
+
+            // Initial call to hide percentage inputs for initially unassigned tasks
+            document.querySelectorAll('select[name^="assignment_type_"]').forEach(selectElement => {
+                const parts = selectElement.name.split('_');
+                const employeeId = parts[2];
+                const taskId = parts[3];
+                togglePercentageInput(employeeId, taskId, selectElement.value);
+            });
+
+            // Initial filter application in case of pre-selected filter or text
+            filterAssignmentTable();
+
+            // PDF Export Funktion
+            document.getElementById('exportPdfButton').addEventListener('click', () => {
+                const inputTable = document.getElementById('assignmentOverviewTable');
+                const { jsPDF } = window.jspdf; // jsPDF aus dem globalen Fensterobjekt holen
+
+                // Temporäre Tabelle für den Export erstellen, um nur sichtbare Elemente zu erfassen
+                const tempTable = document.createElement('table');
+                tempTable.className = 'cross-table'; // CSS-Klassen beibehalten
+
+                // Header kopieren (nur sichtbare Spalten)
+                const tempTHead = document.createElement('thead');
+                const tempHeaderRow = document.createElement('tr');
+                Array.from(inputTable.querySelector('thead tr').children).forEach(th => {
+                    if (th.style.display !== 'none') {
+                        tempHeaderRow.appendChild(th.cloneNode(true));
+                    }
+                });
+                tempTHead.appendChild(tempHeaderRow);
+                tempTable.appendChild(tempTHead);
+
+                // Body kopieren (nur sichtbare Zeilen und Spalten)
+                const tempTBody = document.createElement('tbody');
+                Array.from(inputTable.querySelector('tbody').children).forEach(row => {
+                    if (row.style.display !== 'none') { // Nur sichtbare Zeilen
+                        const tempRow = document.createElement('tr');
+                        Array.from(row.children).forEach(cell => {
+                            if (cell.style.display !== 'none') { // Nur sichtbare Zellen
+                                tempRow.appendChild(cell.cloneNode(true));
+                            }
+                        });
+                        tempTBody.appendChild(tempRow);
+                    }
+                });
+                tempTable.appendChild(tempTBody);
+
+                // Temporäre Tabelle außerhalb des sichtbaren Bereichs hinzufügen, um sie zu rendern
+                document.body.appendChild(tempTable);
+                tempTable.style.position = 'absolute';
+                tempTable.style.left = '-9999px'; // Außerhalb des sichtbaren Bereichs
+
+                html2canvas(tempTable, { scale: 2, logging: false }).then(canvas => {
+                    const imgData = canvas.toDataURL('image/png');
+                    const imgWidth = 200; // Breite des Bildes im PDF (mm)
+                    const pageHeight = 295; // Höhe einer A4-Seite (mm)
+                    const imgHeight = canvas.height * imgWidth / canvas.width;
+                    let heightLeft = imgHeight;
+
+                    const doc = new jsPDF('p', 'mm', 'a4');
+                    let position = 0;
+
+                    doc.addImage(imgData, 'PNG', 5, position, imgWidth, imgHeight);
+                    heightLeft -= pageHeight;
+
+                    while (heightLeft >= 0) {
+                        position = heightLeft - imgHeight;
+                        doc.addPage();
+                        doc.addImage(imgData, 'PNG', 5, position, imgWidth, imgHeight);
+                        heightLeft -= pageHeight;
+                    }
+
+                    doc.save('Mitarbeiter_Aufgabenzuordnung.pdf');
+
+                    // Temporäre Tabelle entfernen
+                    document.body.removeChild(tempTable);
+                }).catch(error => {
+                    console.error("Fehler beim Erstellen des PDFs:", error);
+                    alert("Es gab einen Fehler beim Exportieren der Tabelle als PDF. Bitte versuchen Sie es erneut.");
+                    document.body.removeChild(tempTable); // Auch bei Fehler entfernen
+                });
+            });
+        });
+    </script>
+{% endblock %}

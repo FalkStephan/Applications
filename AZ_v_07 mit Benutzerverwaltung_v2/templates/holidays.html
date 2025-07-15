@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+
+{% block title %}Feiertage{% endblock %}
+
+{% block head_extra_style %}
+    <style>
+        /* Zusätzliche Stile für Suchfeld und Sortier-Header */
+        .search-container {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .search-container input {
+            padding: 8px;
+            width: 50%;
+            max-width: 400px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .sortable-header {
+            cursor: pointer;
+            position: relative;
+            padding-right: 20px; /* Platz für das Sortiersymbol */
+        }
+        .sortable-header::after {
+            content: '';
+            display: inline-block;
+            position: absolute;
+            right: 5px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            vertical-align: middle;
+        }
+        .sortable-header.asc::after {
+            border-bottom: 5px solid #000;
+        }
+        .sortable-header.desc::after {
+            border-top: 5px solid #000;
+        }
+        .sortable-header:not(.asc):not(.desc):hover::after {
+            border-bottom: 5px solid #aaa; /* Lighter indicator for hover */
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+        <h1>Feiertage</h1>
+        <a href="{{ url_for('add_holiday') }}" class="button">Feiertag hinzufügen</a>
+        <a href="{{ url_for('import_holidays') }}" class="button">Feiertage importieren (CSV)</a>
+
+        <div class="search-container">
+            <input type="text" id="holidaySearch" onkeyup="filterTableByYear()" placeholder="Jahr suchen (z.B. 2025)...">
+        </div>
+
+        <table id="holidayTable">
+            <thead>
+                <tr>
+                    <th class="sortable-header" data-column="holiday_date" data-column-type="date">Datum</th>
+                    <th class="sortable-header" data-column="description">Beschreibung</th>
+                    <th>Aktionen</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for holiday in holidays %}
+                <tr>
+                    <td data-sort="{{ holiday.holiday_date.strftime('%Y-%m-%d') }}">{{ holiday.holiday_date.strftime('%d.%m.%Y') }}</td>
+                    <td>{{ holiday.description }}</td>
+                    <td>
+                        <form action="{{ url_for('delete_holiday', holiday_id=holiday.id) }}" method="post" style="display:inline;">
+                            <button type="submit" class="button small delete">Löschen</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <p><a href="{{ url_for('index') }}">Zurück zur Startseite</a></p>
+    </div>
+
+    <script>
+        let currentSortColumn = null;
+        let currentSortDirection = 'asc'; // 'asc' for ascending, 'desc' for descending
+
+        function filterTableByYear() {
+            const input = document.getElementById('holidaySearch');
+            const filter = input.value.trim(); // Leerzeichen entfernen
+            const table = document.getElementById('holidayTable');
+            const tr = table.getElementsByTagName('tr');
+
+            for (let i = 1; i < tr.length; i++) { // Start at 1 to skip header row
+                const tdDate = tr[i].getElementsByTagName('td')[0]; // Datum Spalte
+                if (tdDate) {
+                    const fullDate = tdDate.getAttribute('data-sort'); // Format YYYY-MM-DD
+                    const year = fullDate ? fullDate.substring(0, 4) : ''; // Extrahiere das Jahr
+
+                    if (filter === '' || year === filter) { // Leerer Filter zeigt alles, sonst exakter Jahres-Match
+                        tr[i].style.display = '';
+                    } else {
+                        tr[i].style.display = 'none';
+                    }
+                }
+            }
+        }
+
+        function sortTable(columnIndex, columnType) {
+            const table = document.getElementById('holidayTable');
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.rows);
+            const header = table.getElementsByTagName('th')[columnIndex];
+
+            // Reset all header classes
+            document.querySelectorAll('.sortable-header').forEach(th => {
+                th.classList.remove('asc', 'desc');
+            });
+
+            if (currentSortColumn === columnIndex) {
+                currentSortDirection = (currentSortDirection === 'asc') ? 'desc' : 'asc';
+            } else {
+                currentSortColumn = columnIndex;
+                currentSortDirection = 'asc';
+            }
+
+            header.classList.add(currentSortDirection);
+
+            rows.sort((rowA, rowB) => {
+                let cellA, cellB;
+
+                if (columnType === 'date') {
+                    // Use data-sort attribute for date comparison (YYYY-MM-DD)
+                    cellA = rowA.cells[columnIndex].getAttribute('data-sort');
+                    cellB = rowB.cells[columnIndex].getAttribute('data-sort');
+                } else {
+                    cellA = rowA.cells[columnIndex].textContent.trim();
+                    cellB = rowB.cells[columnIndex].textContent.trim();
+                }
+
+                // Type-specific comparison
+                if (columnType === 'number') {
+                    cellA = parseFloat(cellA);
+                    cellB = parseFloat(cellB);
+                } else if (columnType === 'date') {
+                    // Dates are already YYYY-MM-DD strings, so lexicographical comparison works
+                }
+                else { // Default to string comparison
+                    cellA = cellA.toLowerCase();
+                    cellB = cellB.toLowerCase();
+                }
+
+                let comparison = 0;
+                if (cellA > cellB) {
+                    comparison = 1;
+                } else if (cellA < cellB) {
+                    comparison = -1;
+                }
+
+                return currentSortDirection === 'asc' ? comparison : -comparison;
+            });
+
+            rows.forEach(row => tbody.appendChild(row));
+        }
+
+        // Add event listeners to sortable headers
+        document.addEventListener('DOMContentLoaded', () => {
+            const headers = document.querySelectorAll('.sortable-header');
+            headers.forEach((header, index) => {
+                header.addEventListener('click', () => {
+                    const columnType = header.dataset.columnType || 'string'; // Default to string
+                    sortTable(index, columnType);
+                });
+            });
+        });
+    </script>
+{% endblock %}

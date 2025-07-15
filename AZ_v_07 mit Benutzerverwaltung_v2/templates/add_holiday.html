@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Feiertag hinzufügen{% endblock %}
+
+{% block content %}
+        <h1>Feiertag hinzufügen</h1>
+        <form method="POST">
+            <label for="holiday_date">Datum des Feiertags:</label>
+            <input type="date" id="holiday_date" name="holiday_date" required>
+            <label for="description">Beschreibung:</label>
+            <input type="text" id="description" name="description">
+            <button type="submit">Hinzufügen</button>
+        </form>
+        <p><a href="{{ url_for('holidays') }}">Zurück zu Feiertagen</a></p>
+{% endblock %}

@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block title %}Abteilungsaufgaben{% endblock %}
+
+{% block head_extra_style %}
+    <style>
+        /* Zusätzliche Stile für Suchfeld und Sortier-Header */
+        .search-container {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .search-container input {
+            padding: 8px;
+            width: 50%;
+            max-width: 400px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .sortable-header {
+            cursor: pointer;
+            position: relative;
+            padding-right: 20px; /* Platz für das Sortiersymbol */
+        }
+        .sortable-header::after {
+            content: '';
+            display: inline-block;
+            position: absolute;
+            right: 5px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            vertical-align: middle;
+        }
+        .sortable-header.asc::after {
+            border-bottom: 5px solid #000;
+        }
+        .sortable-header.desc::after {
+            border-top: 5px solid #000;
+        }
+        .sortable-header:not(.asc):not(.desc):hover::after {
+            border-bottom: 5px solid #aaa; /* Lighter indicator for hover */
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+        <h1>Abteilungsaufgaben</h1>
+        <a href="{{ url_for('add_department_task') }}" class="button">Aufgabe hinzufügen</a>
+
+        <div class="search-container">
+            <input type="text" id="taskSearch" onkeyup="filterTable()" placeholder="Aufgabe suchen...">
+        </div>
+
+        <table id="departmentTasksTable">
+            <thead>
+                <tr>
+                    <th class="sortable-header" data-column="name">Name</th>
+                    <th class="sortable-header" data-column="description">Beschreibung</th>
+                    <th>Aktionen</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for task in tasks %}
+                <tr>
+                    <td>{{ task.name }}</td>
+                    <td>{{ task.description }}</td>
+                    <td>
+                        <a href="{{ url_for('edit_department_task', task_id=task.id) }}" class="button small">Bearbeiten</a>
+                        <form action="{{ url_for('delete_department_task', task_id=task.id) }}" method="post" style="display:inline;">
+                            <button type="submit" class="button small delete">Löschen</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <p><a href="{{ url_for('index') }}">Zurück zur Startseite</a></p>
+    </div>
+
+    <script>
+        let currentSortColumn = null;
+        let currentSortDirection = 'asc'; // 'asc' for ascending, 'desc' for descending
+
+        function filterTable() {
+            const input = document.getElementById('taskSearch');
+            const filter = input.value.toLowerCase();
+            const table = document.getElementById('departmentTasksTable');
+            const tr = table.getElementsByTagName('tr');
+
+            for (let i = 1; i < tr.length; i++) { // Start at 1 to skip header row
+                const tdName = tr[i].getElementsByTagName('td')[0]; // Name column
+                const tdDescription = tr[i].getElementsByTagName('td')[1]; // Description column
+
+                if (tdName || tdDescription) {
+                    const nameText = tdName ? tdName.textContent || tdName.innerText : '';
+                    const descriptionText = tdDescription ? tdDescription.textContent || tdDescription.innerText : '';
+
+                    if (nameText.toLowerCase().indexOf(filter) > -1 || descriptionText.toLowerCase().indexOf(filter) > -1) {
+                        tr[i].style.display = '';
+                    } else {
+                        tr[i].style.display = 'none';
+                    }
+                }
+            }
+        }
+
+        function sortTable(columnIndex, columnType) {
+            const table = document.getElementById('departmentTasksTable');
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.rows);
+            const header = table.getElementsByTagName('th')[columnIndex];
+
+            // Reset all header classes
+            document.querySelectorAll('.sortable-header').forEach(th => {
+                th.classList.remove('asc', 'desc');
+            });
+
+            if (currentSortColumn === columnIndex) {
+                currentSortDirection = (currentSortDirection === 'asc') ? 'desc' : 'asc';
+            } else {
+                currentSortColumn = columnIndex;
+                currentSortDirection = 'asc';
+            }
+
+            header.classList.add(currentSortDirection);
+
+            rows.sort((rowA, rowB) => {
+                let cellA = rowA.cells[columnIndex].textContent.trim();
+                let cellB = rowB.cells[columnIndex].textContent.trim();
+
+                // Default to string comparison
+                cellA = cellA.toLowerCase();
+                cellB = cellB.toLowerCase();
+                
+                let comparison = 0;
+                if (cellA > cellB) {
+                    comparison = 1;
+                } else if (cellA < cellB) {
+                    comparison = -1;
+                }
+
+                return currentSortDirection === 'asc' ? comparison : -comparison;
+            });
+
+            rows.forEach(row => tbody.appendChild(row));
+        }
+
+        // Add event listeners to sortable headers
+        document.addEventListener('DOMContentLoaded', () => {
+            const headers = document.querySelectorAll('.sortable-header');
+            headers.forEach((header, index) => {
+                header.addEventListener('click', () => {
+                    const columnType = header.dataset.columnType || 'string'; // Default to string
+                    sortTable(index, columnType);
+                });
+            });
+        });
+    </script>
+{% endblock %}

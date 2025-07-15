@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Einstellungen{% endblock %}
+
+{% block content %}
+        <h1>Einstellungen für Prozent-Summen</h1>
+        <p>Definieren Sie die Schwellenwerte für die farbliche Hervorhebung der Gesamtprozentsätze der Mitarbeiter.</p>
+        <form method="POST">
+            <label for="green_min_threshold">Grün (ab diesem Wert, bis Rot-Grenze):</label>
+            <input type="number" id="green_min_threshold" name="green_min_threshold" min="0" max="100" step="0.1" value="{{ settings.green_min_threshold | default(80.0) }}" required>
+            <small>Werte zwischen diesem Wert (inklusive) und dem Rot-Schwellenwert (exklusive) werden grün dargestellt.</small>
+            
+            <label for="yellow_max_threshold">Gelb (bis zu diesem Wert):</label>
+            <input type="number" id="yellow_max_threshold" name="yellow_max_threshold" min="0" max="100" step="0.1" value="{{ settings.yellow_max_threshold | default(79.9) }}" required>
+            <small>Werte unter diesem Wert (inklusive) werden gelb dargestellt.</small>
+
+            <label for="red_threshold">Rot (ab diesem Wert):</label>
+            <input type="number" id="red_threshold" name="red_threshold" min="0" step="0.1" value="{{ settings.red_threshold | default(100.0) }}" required>
+            <small>Werte ab diesem Wert (inklusive) werden rot dargestellt.</small>
+
+            <button type="submit">Einstellungen speichern</button>
+        </form>
+        <p><a href="{{ url_for('index') }}">Zurück zur Startseite</a></p>
+{% endblock %}

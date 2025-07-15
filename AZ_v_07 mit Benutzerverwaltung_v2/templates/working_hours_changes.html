@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+
+{% block title %}Arbeitszeiten{% endblock %}
+
+{% block head_extra_style %}
+    <style>
+        /* Zusätzliche Stile für Suchfeld und Sortier-Header */
+        .search-container {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .search-container input {
+            padding: 8px;
+            width: 50%;
+            max-width: 400px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .sortable-header {
+            cursor: pointer;
+            position: relative;
+            padding-right: 20px; /* Platz für das Sortiersymbol */
+        }
+        .sortable-header::after {
+            content: '';
+            display: inline-block;
+            position: absolute;
+            right: 5px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            vertical-align: middle;
+        }
+        .sortable-header.asc::after {
+            border-bottom: 5px solid #000;
+        }
+        .sortable-header.desc::after {
+            border-top: 5px solid #000;
+        }
+        .sortable-header:not(.asc):not(.desc):hover::after {
+            border-bottom: 5px solid #aaa; /* Lighter indicator for hover */
+        }
+        /* Optional: CSS für Buttons */
+        .action-buttons button, .action-buttons a {
+            padding: 5px 10px;
+            margin-right: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            color: white;
+            font-size: 0.9em;
+            display: inline-block; /* Für A-Tags */
+            text-align: center;
+        }
+        .action-buttons .edit-btn {
+            background-color: #3498db; /* Blau */
+        }
+        .action-buttons .delete-btn {
+            background-color: #e74c3c; /* Rot */
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+        <h1>Arbeitszeiten verwalten</h1>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <ul class="flashes">
+                {% for category, message in messages %}
+                    <li class="{{ category }}">{{ message }}</li>
+                {% endfor %}
+                </ul>
+            {% endif %}
+        {% endwith %}
+
+        <h2>Neue Arbeitszeitänderung hinzufügen</h2>
+        <form action="{{ url_for('add_working_hours_change') }}" method="POST">
+            <label for="employee_id">Mitarbeiter:</label>
+            <select id="employee_id" name="employee_id" required>
+                {% for employee in employees %}
+                    <option value="{{ employee.id }}">{{ employee.name }}</option>
+                {% endfor %}
+            </select>
+
+            <label for="new_hours">Neue Wochenarbeitszeit:</label>
+            <input type="number" id="new_hours" name="new_hours" step="0.01" min="0" max="1" required>
+
+            <label for="change_date">Datum der Änderung:</label>
+            <input type="date" id="change_date" name="change_date" value="{{ today }}" required>
+
+            <label for="reason">Grund der Änderung:</label>
+            <textarea id="reason" name="reason" rows="3"></textarea>
+
+            <button type="submit">Änderung hinzufügen</button>
+        </form>
+
+        <hr>
+
+        <h2>Bestehende Arbeitszeitänderungen</h2>
+        <div class="search-container">
+            <input type="text" id="changeSearch" onkeyup="filterTable()" placeholder="Suchen nach Mitarbeiter oder Datum...">
+        </div>
+
+        <table id="workingHoursTable">
+            <thead>
+                <tr>
+                    <th class="sortable-header" data-column="employee_name">Mitarbeiter</th>
+                    <th>Alte Stunden</th> {# Nicht sortierbar, da es nur der Wert der letzten Änderung ist #}
+                    <th class="sortable-header" data-column="new_hours" data-column-type="number">Neue Stunden</th>
+                    <th class="sortable-header" data-column="change_date" data-column-type="date">Datum der Änderung</th>
+                    <!--<th class="sortable-header" data-column="reason">Grund</th>-->
+                    <th>Aktionen</th> {# NEU: Aktionen-Spalte #}
+                </tr>
+            </thead>
+            <tbody>
+                {% for change in changes %}
+                    <tr>
+                        <td>{{ change.employee.name }}</td>
+                        <td>{{ "%.2f" | format(change.old_hours) }}</td>
+                        <td>{{ "%.2f" | format(change.new_hours) }}</td>
+                        <td data-sort="{{ change.change_date.strftime('%Y-%m-%d') }}">{{ change.change_date.strftime('%d.%m.%Y') }}</td>
+                        <!--<td>{{ change.reason }}</td>-->
+                        <td class="action-buttons">
+                            <a href="{{ url_for('edit_working_hours_change', change_id=change.id) }}" class="button small">Bearbeiten</a>
+                            <form action="{{ url_for('delete_working_hours_change', change_id=change.id) }}" method="POST" style="display:inline;">
+                                <button type="submit" class="button small delete" onclick="return confirm('Sind Sie sicher, dass Sie diese Arbeitszeitänderung löschen möchten?');">Löschen</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="6">Noch keine Arbeitszeitänderungen vorhanden.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <p><a href="{{ url_for('index') }}">Zurück zur Startseite</a></p>
+    </div>
+    <script>
+        // Setzt das heutige Datum als Standard für das Datum der Änderung
+        document.addEventListener('DOMContentLoaded', function() {
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0'); // Months start at 0!
+            const dd = String(today.getDate()).padStart(2, '0');
+            const formattedToday = `${yyyy}-${mm}-${dd}`;
+            document.getElementById('change_date').value = formattedToday;
+        });
+
+        // JavaScript für Sortierung und Suche (wie bei anderen Listen)
+        let currentSortColumn = null;
+        let currentSortDirection = 'asc';
+
+        function filterTable() {
+            const input = document.getElementById('changeSearch');
+            const filter = input.value.toLowerCase();
+            const table = document.getElementById('workingHoursTable');
+            const tr = table.getElementsByTagName('tr');
+
+            for (let i = 1; i < tr.length; i++) {
+                let rowVisible = false;
+                // Überprüfe alle relevanten Zellen
+                const tdEmployeeName = tr[i].getElementsByTagName('td')[0];
+                const tdChangeDate = tr[i].getElementsByTagName('td')[3]; // Datum
+                const tdReason = tr[i].getElementsByTagName('td')[4];    // Grund
+
+                if (tdEmployeeName && tdEmployeeName.textContent.toLowerCase().indexOf(filter) > -1) {
+                    rowVisible = true;
+                } else if (tdChangeDate && tdChangeDate.textContent.toLowerCase().indexOf(filter) > -1) {
+                    rowVisible = true;
+                } else if (tdReason && tdReason.textContent.toLowerCase().indexOf(filter) > -1) {
+                    rowVisible = true;
+                }
+                tr[i].style.display = rowVisible ? '' : 'none';
+            }
+        }
+
+        function sortTable(columnIndex, columnType) {
+            const table = document.getElementById('workingHoursTable');
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.rows);
+            const header = table.getElementsByTagName('th')[columnIndex];
+
+            document.querySelectorAll('.sortable-header').forEach(th => {
+                th.classList.remove('asc', 'desc');
+            });
+
+            if (currentSortColumn === columnIndex) {
+                currentSortDirection = (currentSortDirection === 'asc') ? 'desc' : 'asc';
+            } else {
+                currentSortColumn = columnIndex;
+                currentSortDirection = 'asc';
+            }
+
+            header.classList.add(currentSortDirection);
+
+            rows.sort((rowA, rowB) => {
+                let cellA, cellB;
+
+                if (columnType === 'date') {
+                    cellA = rowA.cells[columnIndex].getAttribute('data-sort');
+                    cellB = rowB.cells[columnIndex].getAttribute('data-sort');
+                } else {
+                    cellA = rowA.cells[columnIndex].textContent.trim();
+                    cellB = rowB.cells[columnIndex].textContent.trim();
+                }
+
+                if (columnType === 'number') {
+                    cellA = parseFloat(cellA);
+                    cellB = parseFloat(cellB);
+                } else if (columnType === 'date') {
+                    // Dates are already YYYY-MM-DD strings, so lexicographical comparison works
+                } else {
+                    cellA = cellA.toLowerCase();
+                    cellB = cellB.toLowerCase();
+                }
+
+                let comparison = 0;
+                if (cellA > cellB) {
+                    comparison = 1;
+                } else if (cellA < cellB) {
+                    comparison = -1;
+                }
+
+                return currentSortDirection === 'asc' ? comparison : -comparison;
+            });
+
+            rows.forEach(row => tbody.appendChild(row));
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const headers = document.querySelectorAll('#workingHoursTable .sortable-header');
+            headers.forEach((header, index) => {
+                header.addEventListener('click', () => {
+                    // index + 1, da die erste Spalte in JavaScript 0-basiert ist, aber hier die Tabellenheader-Reihenfolge passt
+                    const columnType = header.dataset.columnType || 'string';
+                    sortTable(index, columnType);
+                });
+            });
+        });
+    </script>
+{% endblock %}

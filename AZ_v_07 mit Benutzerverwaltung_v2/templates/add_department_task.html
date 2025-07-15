@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Aufgabe hinzufügen{% endblock %}
+
+{% block content %}
+        <h1>Aufgabe hinzufügen</h1>
+        <form method="POST">
+            <label for="name">Name der Aufgabe:</label>
+            <input type="text" id="name" name="name" required>
+            <label for="description">Beschreibung:</label>
+            <textarea id="description" name="description"></textarea>
+            <button type="submit">Hinzufügen</button>
+        </form>
+        <p><a href="{{ url_for('department_tasks') }}">Zurück zu Abteilungsaufgaben</a></p>
+{% endblock %}

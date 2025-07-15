@@ -1,0 +1,304 @@
+/* static/style.css */
+body {
+    font-family: Arial, sans-serif;
+    margin: 0; /* Remove default body margin */
+    background-color: #f4f4f4;
+    color: #333;
+}
+
+.wrapper {
+    display: flex; /* Use flexbox for overall layout */
+    min-height: 100vh; /* Ensure wrapper takes full viewport height */
+}
+
+.sidebar {
+    width: 200px; /* Fixed width for sidebar */
+    background-color: #333;
+    color: white;
+    padding: 20px;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.2);
+    flex-shrink: 0; /* Prevent sidebar from shrinking */
+    position: sticky; /* Make it sticky */
+    top: 0; /* Stick to the top */
+    height: 100vh; /* Make sidebar take full viewport height */
+    overflow-y: auto; /* Enable scrolling if content overflows */
+}
+.sidebar h2 {
+    color: white;
+    margin-top: 0;
+    text-align: center;
+}
+.sidebar ul {
+    list-style: none;
+    padding: 0;
+}
+.sidebar ul li {
+    margin-bottom: 10px;
+}
+.sidebar ul li a {
+    text-decoration: none;
+    color: white;
+    display: block;
+    padding: 8px 10px;
+    border-radius: 4px;
+}
+.sidebar ul li a:hover {
+    background-color: #555;
+}
+
+.main-content {
+    flex-grow: 1; /* Allow main content to take remaining space */
+    padding: 20px;
+    /* max-width is now handled by the flexbox and container inside */
+}
+
+.container {
+    max-width: 900px; /* Max width for content inside main-content */
+    margin: 0 auto; /* Center the content within main-content */
+    background-color: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+h1, h2 {
+    color: #0056b3;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+nav ul { /* This style might be redundant if only sidebar nav is used */
+    list-style: none;
+    padding: 0;
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+nav ul li { /* This style might be redundant if only sidebar nav is used */
+    display: inline;
+    margin-right: 20px;
+}
+
+nav ul li a { /* This style might be redundant if only sidebar nav is used */
+    text-decoration: none;
+    color: #007bff;
+    font-weight: bold;
+}
+
+nav ul li a:hover { /* This style might be redundant if only sidebar nav is used */
+    color: #0056b3;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+}
+
+table, th, td {
+    border: 1px solid #ddd;
+}
+
+th, td {
+    padding: 10px;
+    text-align: left;
+}
+
+th {
+    background-color: #f2f2f2;
+}
+
+.button {
+    display: inline-block;
+    padding: 10px 15px;
+    margin: 10px 0;
+    background-color: #007bff;
+    color: white;
+    text-align: center;
+    text-decoration: none;
+    border-radius: 5px;
+    border: none;
+    cursor: pointer;
+}
+
+.button:hover {
+    background-color: #0056b3;
+}
+
+.button.small {
+    padding: 5px 10px;
+    font-size: 0.9em;
+}
+
+.button.delete {
+    background-color: #dc3545;
+}
+
+.button.delete:hover {
+    background-color: #c82333;
+}
+
+form {
+    background-color: #f9f9f9;
+    padding: 20px;
+    border-radius: 5px;
+    margin-top: 20px;
+}
+
+form label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: bold;
+}
+
+form input[type="text"],
+form input[type="date"],
+form input[type="number"],
+form select,
+form textarea {
+    width: calc(100% - 22px);
+    padding: 10px;
+    margin-bottom: 15px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+form button[type="submit"] {
+    background-color: #28a745;
+    color: white;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1em;
+}
+
+form button[type="submit"]:hover {
+    background-color: #218838;
+}
+
+/* Flashes (moved to base.html, but styles still here) */
+.flashes {
+    list-style: none;
+    padding: 10px;
+    margin-bottom: 20px;
+    border-radius: 5px;
+}
+
+.flashes li {
+    padding: 10px;
+    margin-bottom: 10px;
+    border-radius: 5px;
+}
+
+.flashes .success {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.flashes .danger {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+/* Page-specific styles (now often in head_extra_style blocks) */
+.search-container {
+    margin-bottom: 20px;
+    text-align: center;
+}
+.search-container input {
+    padding: 8px;
+    width: 50%;
+    max-width: 400px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+.sortable-header {
+    cursor: pointer;
+    position: relative;
+    padding-right: 20px; /* Platz für das Sortiersymbol */
+}
+.sortable-header::after {
+    content: '';
+    display: inline-block;
+    position: absolute;
+    right: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    vertical-align: middle;
+}
+.sortable-header.asc::after {
+    border-bottom: 5px solid #000;
+}
+.sortable-header.desc::after {
+    border-top: 5px solid #000;
+}
+.sortable-header:not(.asc):not(.desc):hover::after {
+    border-bottom: 5px solid #aaa; /* Lighter indicator for hover */
+}
+
+/* Optional: CSS für Buttons (already in action-buttons above) */
+/*
+.action-buttons button, .action-buttons a {
+    padding: 5px 10px;
+    margin-right: 5px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    text-decoration: none;
+    color: white;
+    font-size: 0.9em;
+    display: inline-block;
+    text-align: center;
+}
+.action-buttons .edit-btn {
+    background-color: #3498db;
+}
+.action-buttons .delete-btn {
+    background-color: #e74c3c;
+}
+*/
+
+/* Farbliche Hervorhebung für die Summen */
+.sum-red {
+    color: white;
+    background-color: #e74c3c; /* Dunkles Rot */
+    font-weight: bold;
+}
+.sum-green {
+    color: white;
+    background-color: #2ecc71; /* Dunkles Grün */
+    font-weight: bold;
+}
+.sum-yellow {
+    color: black;
+    background-color: #f1c40f; /* Dunkles Gelb */
+    font-weight: bold;
+}
+
+/* Styles for assign_tasks cross-table */
+.cross-table select {
+    width: 100%;
+    padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    margin-bottom: 5px;
+}
+.cross-table input[type="number"] {
+    width: 100%;
+    padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
+    text-align: right;
+}
+.cross-table td {
+    vertical-align: top;
+}

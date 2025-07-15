@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block title %}Mitarbeiterliste{% endblock %}
+
+{% block head_extra_style %}
+    <style>
+        /* Styles for search and sortable headers specific to this page */
+        .search-container {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .search-container input {
+            padding: 8px;
+            width: 50%;
+            max-width: 400px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .sortable-header {
+            cursor: pointer;
+            position: relative;
+            padding-right: 20px;
+        }
+        .sortable-header::after {
+            content: '';
+            display: inline-block;
+            position: absolute;
+            right: 5px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            vertical-align: middle;
+        }
+        .sortable-header.asc::after {
+            border-bottom: 5px solid #000;
+        }
+        .sortable-header.desc::after {
+            border-top: 5px solid #000;
+        }
+        .sortable-header:not(.asc):not(.desc):hover::after {
+            border-bottom: 5px solid #aaa;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    <h1>Mitarbeiterliste</h1>
+    <a href="{{ url_for('add_employee') }}" class="button">Mitarbeiter hinzufügen</a>
+
+    <div class="search-container">
+        <input type="text" id="employeeSearch" onkeyup="filterTable()" placeholder="Mitarbeiter suchen...">
+    </div>
+
+    <table id="employeeTable">
+        <thead>
+            <tr>
+                <th class="sortable-header" data-column="name">Name des Mitarbeiters</th>
+                <th class="sortable-header" data-column="job_title">Stellenbezeichnung</th>
+                <th class="sortable-header" data-column="team">Team</th> {# NEU: Team-Spalte #}
+                <th>Aktionen</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for employee in employees %}
+            <tr>
+                <td>{{ employee.name }}</td>
+                <td>{{ employee.job_title }}</td>
+                <td>{{ employee.team | default('-') }}</td> {# NEU: Team-Wert anzeigen, Default '-' wenn leer #}
+                <td>
+                    <a href="{{ url_for('edit_employee', employee_id=employee.id) }}" class="button small">Bearbeiten</a>
+                    <form action="{{ url_for('delete_employee', employee_id=employee.id) }}" method="post" style="display:inline;">
+                        <button type="submit" class="button small delete">Löschen</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% endblock %}
+
+{% block extra_script %}
+    <script>
+        let currentSortColumn = null;
+        let currentSortDirection = 'asc';
+
+        function filterTable() {
+            const input = document.getElementById('employeeSearch');
+            const filter = input.value.toLowerCase();
+            const table = document.getElementById('employeeTable');
+            const tr = table.getElementsByTagName('tr');
+
+            for (let i = 1; i < tr.length; i++) { // Start at 1 to skip header row
+                const tdName = tr[i].getElementsByTagName('td')[0]; // Name column
+                const tdJobTitle = tr[i].getElementsByTagName('td')[1]; // Job Title column
+                const tdTeam = tr[i].getElementsByTagName('td')[2]; // NEU: Team column
+
+                if (tdName || tdJobTitle || tdTeam) {
+                    const nameText = tdName ? tdName.textContent || tdName.innerText : '';
+                    const jobTitleText = tdJobTitle ? tdJobTitle.textContent || tdJobTitle.innerText : '';
+                    const teamText = tdTeam ? tdTeam.textContent || tdTeam.innerText : ''; // NEU
+
+                    if (nameText.toLowerCase().indexOf(filter) > -1 || 
+                        jobTitleText.toLowerCase().indexOf(filter) > -1 ||
+                        teamText.toLowerCase().indexOf(filter) > -1) { // NEU: Team in Suche einbeziehen
+                        tr[i].style.display = '';
+                    } else {
+                        tr[i].style.display = 'none';
+                    }
+                }
+            }
+        }
+
+        function sortTable(columnIndex, columnType) {
+            const table = document.getElementById('employeeTable');
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.rows);
+            const header = table.getElementsByTagName('th')[columnIndex];
+
+            document.querySelectorAll('.sortable-header').forEach(th => {
+                th.classList.remove('asc', 'desc');
+            });
+
+            if (currentSortColumn === columnIndex) {
+                currentSortDirection = (currentSortDirection === 'asc') ? 'desc' : 'asc';
+            } else {
+                currentSortColumn = columnIndex;
+                currentSortDirection = 'asc';
+            }
+
+            header.classList.add(currentSortDirection);
+
+            rows.sort((rowA, rowB) => {
+                let cellA = rowA.cells[columnIndex].textContent.trim();
+                let cellB = rowB.cells[columnIndex].textContent.trim();
+
+                if (columnType === 'number') {
+                    cellA = parseFloat(cellA);
+                    cellB = parseFloat(cellB);
+                } else {
+                    cellA = cellA.toLowerCase();
+                    cellB = cellB.toLowerCase();
+                }
+
+                let comparison = 0;
+                if (cellA > cellB) {
+                    comparison = 1;
+                } else if (cellA < cellB) {
+                    comparison = -1;
+                }
+
+                return currentSortDirection === 'asc' ? comparison : -comparison;
+            });
+
+            rows.forEach(row => tbody.appendChild(row));
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const headers = document.querySelectorAll('.sortable-header');
+            headers.forEach((header, index) => {
+                header.addEventListener('click', () => {
+                    const columnType = header.dataset.columnType || 'string';
+                    sortTable(index, columnType);
+                });
+            });
+        });
+    </script>
+{% endblock %}

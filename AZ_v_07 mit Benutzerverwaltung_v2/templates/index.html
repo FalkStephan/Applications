@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Ressourcensteuerung{% endblock %}
+
+{% block content %}
+        <h1>Ressourcensteuerung</h1>
+        <nav>
+            <ul>
+                <li><a href="{{ url_for('employees') }}">Mitarbeiter</a></li>
+                <li><a href="{{ url_for('working_hours_changes') }}">Arbeitszeiten</a></li>
+                <li><a href="{{ url_for('holidays') }}">Feiertage</a></li>
+                <li><a href="{{ url_for('department_tasks') }}">Abteilungsaufgaben</a></li>
+                <li><a href="{{ url_for('assign_tasks') }}">Aufgabenzuordnung</a></li>
+                <li><a href="{{ url_for('settings') }}">Einstellungen</a></li>
+            </ul>
+        </nav>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <ul class="flashes">
+                {% for category, message in messages %}
+                    <li class="{{ category }}">{{ message }}</li>
+                {% endfor %}
+                </ul>
+            {% endif %}
+        {% endwith %}
+{% endblock %}

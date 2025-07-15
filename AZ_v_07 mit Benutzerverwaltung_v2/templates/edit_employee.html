@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}Mitarbeiter hinzufügen{% endblock %}
+
+{% block content %}
+    <h1>Mitarbeiter hinzufügen</h1>
+    <form method="POST">
+        <label for="name">Name des Mitarbeiters:</label>
+        <input type="text" id="name" name="name" required>
+        <label for="job_title">Stellenbezeichnung:</label>
+        <input type="text" id="job_title" name="job_title" required>
+        <label for="team">Team:</label> {# NEU: Team-Feld #}
+        <input type="text" id="team" name="team"> {# NEU: Team-Feld #}
+        <button type="submit">Hinzufügen</button>
+    </form>
+    <p><a href="{{ url_for('employees') }}">Zurück zur Mitarbeiterliste</a></p>
+{% endblock %}
