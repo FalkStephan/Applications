@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Benutzer hinzufügen{% endblock %}
+{% block content %}
+    <h1>Benutzer hinzufügen</h1>
+    <form method="POST">
+        <label for="username">Benutzername:</label>
+        <input type="text" id="username" name="username" required>
+        <label for="password">Passwort:</label>
+        <input type="password" id="password" name="password" required>
+        <label for="oe_number">OE-Nummer:</label>
+        <input type="text" id="oe_number" name="oe_number" required>
+        <label for="is_admin">
+            <input type="checkbox" id="is_admin" name="is_admin"> Ist Administrator
+        </label>
+        <button type="submit">Hinzufügen</button>
+    </form>
+    <p><a href="{{ url_for('user_list') }}">Zurück zur Benutzerliste</a></p>
+{% endblock %}

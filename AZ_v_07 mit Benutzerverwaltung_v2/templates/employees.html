@@ -52,7 +52,7 @@
     <a href="{{ url_for('add_employee') }}" class="button">Mitarbeiter hinzufügen</a>
 
     <div class="search-container">
-        <input type="text" id="employeeSearch" onkeyup="filterTable()" placeholder="Mitarbeiter suchen...">
+        <input type="text" id="employeeSearch" onkeyup="filterTable()" placeholder="Mitarbeiter, Team, Stelle, OE suchen...">
     </div>
 
     <table id="employeeTable">
@@ -60,7 +60,8 @@
             <tr>
                 <th class="sortable-header" data-column="name">Name des Mitarbeiters</th>
                 <th class="sortable-header" data-column="job_title">Stellenbezeichnung</th>
-                <th class="sortable-header" data-column="team">Team</th> {# NEU: Team-Spalte #}
+                <th class="sortable-header" data-column="team">Team</th> 
+                <th class="sortable-header" data-column="oe_number">OE</th> 
                 <th>Aktionen</th>
             </tr>
         </thead>
@@ -69,7 +70,8 @@
             <tr>
                 <td>{{ employee.name }}</td>
                 <td>{{ employee.job_title }}</td>
-                <td>{{ employee.team | default('-') }}</td> {# NEU: Team-Wert anzeigen, Default '-' wenn leer #}
+                <td>{{ employee.team | default('-') }}</td> 
+                <td>{{ employee.oe_number }}</td>
                 <td>
                     <a href="{{ url_for('edit_employee', employee_id=employee.id) }}" class="button small">Bearbeiten</a>
                     <form action="{{ url_for('delete_employee', employee_id=employee.id) }}" method="post" style="display:inline;">
@@ -97,15 +99,18 @@
                 const tdName = tr[i].getElementsByTagName('td')[0]; // Name column
                 const tdJobTitle = tr[i].getElementsByTagName('td')[1]; // Job Title column
                 const tdTeam = tr[i].getElementsByTagName('td')[2]; // NEU: Team column
+                const tdOenumber = tr[i].getElementsByTagName('td')[3]; // NEU: OE column
 
                 if (tdName || tdJobTitle || tdTeam) {
                     const nameText = tdName ? tdName.textContent || tdName.innerText : '';
                     const jobTitleText = tdJobTitle ? tdJobTitle.textContent || tdJobTitle.innerText : '';
                     const teamText = tdTeam ? tdTeam.textContent || tdTeam.innerText : ''; // NEU
+                    const oenumber = tdOenumber ? tdOenumber.textContent || tdOenumber.innerText : ''; // NEU
 
                     if (nameText.toLowerCase().indexOf(filter) > -1 || 
                         jobTitleText.toLowerCase().indexOf(filter) > -1 ||
-                        teamText.toLowerCase().indexOf(filter) > -1) { // NEU: Team in Suche einbeziehen
+                        teamText.toLowerCase().indexOf(filter) > -1 || // NEU: Team in Suche einbeziehen
+                        oenumber.toLowerCase().indexOf(filter) > -1) { // NEU: OE in Suche einbeziehen
                         tr[i].style.display = '';
                     } else {
                         tr[i].style.display = 'none';

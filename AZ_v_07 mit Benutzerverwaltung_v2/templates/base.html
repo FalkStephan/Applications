@@ -5,24 +5,36 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Mitarbeiterverwaltung{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    {% block head_extra_style %}{% endblock %} {# Für seiten-spezifische Stile #}
+    {% block head_extra_style %}{% endblock %}
 </head>
 <body>
-    <div class="wrapper"> {# Wrapper for flexbox layout #}
+    <div class="wrapper">
+        {% block sidebar %}
         <div class="sidebar">
             <h2>Navigation</h2>
             <ul>
                 <li><a href="{{ url_for('employees') }}">Mitarbeiter verwalten</a></li>
                 <li><a href="{{ url_for('working_hours_changes') }}">Wochenarbeitszeit ändern</a></li>
-                <li><a href="{{ url_for('holidays') }}">Feiertage verwalten</a></li>
                 <li><a href="{{ url_for('department_tasks') }}">Abteilungsaufgaben verwalten</a></li>
                 <li><a href="{{ url_for('assign_tasks') }}">Aufgaben zuordnen</a></li>
-                <li><a href="{{ url_for('settings') }}">Einstellungen</a></li>
+                {% if current_user.is_admin %}
+                    <hr>
+                    <li><a href="{{ url_for('holidays') }}">Feiertage verwalten</a></li>                    
+                    <li><a href="{{ url_for('user_list') }}">Benutzer verwalten</a></li>
+                    <li><a href="{{ url_for('settings') }}">Einstellungen</a></li>
+                    <li><a href="{{ url_for('logbook') }}">Logbuch</a></li>
+                {% endif %}
+                <hr>
+                <hr>
             </ul>
+            <div style="position: relative; top: 10px; width: 100%;">
+                 <p style="text-align: center;">Angemeldet als:<br><b>{{ current_user.username }}</b></p>
+                 <a href="{{ url_for('logout') }}" class="button" style="width: 70%; margin: 8%;">Abmelden</a>
+            </div>
         </div>
+        {% endblock %}
         <div class="main-content">
             <div class="container">
-                {# Flash-Nachrichten hier, da sie auf allen Seiten erscheinen sollen #}
                 {% with messages = get_flashed_messages(with_categories=true) %}
                     {% if messages %}
                         <ul class="flashes">
@@ -32,11 +44,10 @@
                         </ul>
                     {% endif %}
                 {% endwith %}
-
-                {% block content %}{% endblock %} {# Hier wird der Inhalt jeder spezifischen Seite eingefügt #}
+                {% block content %}{% endblock %}
             </div>
         </div>
     </div>
-    {% block extra_script %}{% endblock %} {# Für seiten-spezifische JavaScripts #}
+    {% block extra_script %}{% endblock %}
 </body>
 </html>

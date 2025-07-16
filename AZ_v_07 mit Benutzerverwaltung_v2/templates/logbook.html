@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Logbuch{% endblock %}
+
+{% block content %}
+    <h1>Logbuch der Datenbankänderungen</h1>
+    <p>Hier werden alle Änderungen an der Datenbank protokolliert.</p>
+
+    <table id="logbookTable">
+        <thead>
+            <tr>
+                <th>Zeitstempel (UTC)</th>
+                <th>Benutzer</th>
+                <th>Aktion</th>
+                <th>Beschreibung</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in logs.items %}
+            <tr>
+                <td>{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                <td>{{ log.username }}</td>
+                <td><span class="button small 
+                    {% if log.action == 'Erstellen' %}create{% elif log.action == 'Löschen' %}delete{% else %}edit-btn{% endif %}">
+                    {{ log.action }}
+                    </span>
+                </td>
+                <td style="word-break: break-all;">{{ log.description }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4">Das Logbuch ist leer.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {# Pagination-Links #}
+    <div class="pagination" style="text-align: center; margin-top: 20px;">
+        {% if logs.has_prev %}
+            <a href="{{ url_for('logbook', page=logs.prev_num) }}" class="button">&laquo; Neuere</a>
+        {% endif %}
+        Seite {{ logs.page }} von {{ logs.pages }}.
+        {% if logs.has_next %}
+            <a href="{{ url_for('logbook', page=logs.next_num) }}" class="button">Ältere &raquo;</a>
+        {% endif %}
+    </div>
+{% endblock %}

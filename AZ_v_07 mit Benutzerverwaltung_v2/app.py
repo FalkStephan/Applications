@@ -1,120 +1,427 @@
 # app.py
 from flask import Flask, render_template, request, redirect, url_for, flash
-from models import db, Employee, WorkingHoursChange, Holiday, DepartmentTask, EmployeeTask, Settings
+from models import db, Employee, WorkingHoursChange, Holiday, DepartmentTask, EmployeeTask, Settings, User, Log
 from datetime import datetime
-import csv 
-from io import TextIOWrapper 
+import csv
+from io import TextIOWrapper
 from flask_migrate import Migrate
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from functools import wraps
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///employees.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.secret_key = 'your_secret_key' # Ersetzen Sie dies durch einen sicheren Schlüssel
+app.config['SECRET_KEY'] = 'a_very_secret_key_change_it' # Unbedingt ändern!
 
 db.init_app(app)
+migrate = Migrate(app, db)
 
-# Datenbanktabellen erstellen und Standardeinstellungen initialisieren
-# Dies wird EINMAL beim Start der Anwendung ausgeführt.
-with app.app_context(): # <-- NEU: Hier wird der Anwendungs-Kontext erzwungen
-    migrate = Migrate(app, db)
+# Flask-Login Initialisierung
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+login_manager.login_message = "Bitte melden Sie sich an, um diese Seite aufzurufen."
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+# Datenbanktabellen erstellen und Standard-Admin anlegen
+with app.app_context():
     db.create_all()
-    # Sicherstellen, dass ein Einstellungsdatensatz existiert
     if not Settings.query.first():
-        default_settings = Settings()
-        db.session.add(default_settings)
+        db.session.add(Settings())
         db.session.commit()
-        
-# Datenbank initialisieren
-# @app.before_request
-# def create_tables():
-# db.create_all()
+    if not User.query.filter_by(is_admin=True).first():
+        admin_user = User(username='admin', oe_number='GLOBAL', is_admin=True)
+        admin_user.set_password('admin')
+        db.session.add(admin_user)
+        db.session.commit()
+        print("Default admin user 'admin' with password 'admin' created.")
 
+# --- Hilfsfunktionen & Decorators ---
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not current_user.is_admin:
+            flash('Für diese Aktion sind Administratorrechte erforderlich.', 'danger')
+            return redirect(url_for('index'))
+        return f(*args, **kwargs)
+    return decorated_function
 
-# --- Hauptrouten ---
+def log_action(action, description):
+    """Manuelle Funktion zum Erstellen von Log-Einträgen."""
+    try:
+        log = Log(
+            user_id=current_user.id if current_user.is_authenticated else None,
+            username=current_user.username if current_user.is_authenticated else 'System',
+            action=action,
+            description=description
+        )
+        db.session.add(log)
+        db.session.commit()
+    except Exception as e:
+        app.logger.error(f"Fehler beim Schreiben ins Logbuch: {e}")
+        db.session.rollback()
+
+# --- Authentifizierung & Hauptrouten ---
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    if request.method == 'POST':
+        user = User.query.filter_by(username=request.form['username']).first()
+        if user and user.check_password(request.form['password']):
+            login_user(user)
+            log_action("Login", f"Benutzer '{user.username}' hat sich angemeldet.")
+            return redirect(url_for('index'))
+        flash('Ungültiger Benutzername oder Passwort.', 'danger')
+    return render_template('login.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    log_action("Logout", f"Benutzer '{current_user.username}' hat sich abgemeldet.")
+    logout_user()
+    return redirect(url_for('login'))
 
 @app.route('/')
+@login_required
 def index():
     return render_template('index.html')
 
-### **1. Mitarbeiterverwaltung**
+# --- Admin-Routen ---
+@app.route('/admin/users')
+@login_required
+@admin_required
+def user_list():
+    users = User.query.order_by(User.username).all()
+    return render_template('user_list.html', users=users)
 
-### **Mitarbeiterliste und Hinzufügen**
+@app.route('/admin/users/add', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def add_user():
+    if request.method == 'POST':
+        username = request.form['username']
+        if User.query.filter_by(username=username).first():
+            flash('Benutzername existiert bereits.', 'danger')
+            return redirect(url_for('add_user'))
+        new_user = User(username=username, oe_number=request.form['oe_number'], is_admin='is_admin' in request.form)
+        new_user.set_password(request.form['password'])
+        db.session.add(new_user)
+        db.session.commit()
+        log_action("Erstellen", f"Neuer Benutzer '{username}' wurde angelegt.")
+        flash('Benutzer erfolgreich hinzugefügt.', 'success')
+        return redirect(url_for('user_list'))
+    return render_template('add_user.html')
 
-### **Route:**
+@app.route('/admin/users/edit/<int:user_id>', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def edit_user(user_id):
+    user = User.query.get_or_404(user_id)
+    if request.method == 'POST':
+        user.username = request.form['username']
+        user.oe_number = request.form['oe_number']
+        user.is_admin = 'is_admin' in request.form
+        password = request.form.get('password')
+        if password:
+            user.set_password(password)
+        db.session.commit()
+        log_action("Bearbeiten", f"Benutzer '{user.username}' (ID: {user_id}) wurde aktualisiert.")
+        flash('Benutzer erfolgreich aktualisiert.', 'success')
+        return redirect(url_for('user_list'))
+    return render_template('edit_user.html', user=user)
 
+@app.route('/admin/users/delete/<int:user_id>', methods=['POST'])
+@login_required
+@admin_required
+def delete_user(user_id):
+    user = User.query.get_or_404(user_id)
+    if user.is_admin and User.query.filter_by(is_admin=True).count() == 1:
+        flash('Der letzte Administrator kann nicht gelöscht werden.', 'danger')
+        return redirect(url_for('user_list'))
+    username = user.username
+    db.session.delete(user)
+    db.session.commit()
+    log_action("Löschen", f"Benutzer '{username}' (ID: {user_id}) wurde gelöscht.")
+    flash('Benutzer erfolgreich gelöscht.', 'success')
+    return redirect(url_for('user_list'))
+
+@app.route('/admin/logbook')
+@login_required
+@admin_required
+def logbook():
+    page = request.args.get('page', 1, type=int)
+    logs = Log.query.order_by(Log.timestamp.desc()).paginate(page=page, per_page=20)
+    return render_template('logbook.html', logs=logs)
+
+# --- Mitarbeiterverwaltung ---
 @app.route('/employees')
+@login_required
 def employees():
-    employees = Employee.query.all()
-    return render_template('employees.html', employees=employees)
-
+    query = Employee.query
+    if not current_user.is_admin:
+        query = query.filter_by(oe_number=current_user.oe_number)
+    return render_template('employees.html', employees=query.order_by(Employee.name).all())
 
 @app.route('/employees/add', methods=['GET', 'POST'])
+@login_required
 def add_employee():
     if request.method == 'POST':
-        name = request.form['name']
-        job_title = request.form['job_title']
-        team = request.form.get('team') # NEU: Team-Feld abrufen
-        new_employee = Employee(name=name, job_title=job_title, team=team) # NEU: Team übergeben
+        oe_number = request.form.get('oe_number') if current_user.is_admin else current_user.oe_number
+        new_employee = Employee(name=request.form['name'], job_title=request.form['job_title'], team=request.form.get('team'), oe_number=oe_number)
         db.session.add(new_employee)
         db.session.commit()
+        log_action("Erstellen", f"Neuer Mitarbeiter '{new_employee.name}' wurde angelegt.")
         flash('Mitarbeiter erfolgreich hinzugefügt!', 'success')
         return redirect(url_for('employees'))
     return render_template('add_employee.html')
 
 @app.route('/employees/edit/<int:employee_id>', methods=['GET', 'POST'])
+@login_required
 def edit_employee(employee_id):
     employee = Employee.query.get_or_404(employee_id)
+    if not current_user.is_admin and employee.oe_number != current_user.oe_number:
+        flash('Keine Berechtigung.', 'danger'); return redirect(url_for('employees'))
     if request.method == 'POST':
         employee.name = request.form['name']
         employee.job_title = request.form['job_title']
-        employee.team = request.form.get('team') # NEU: Team-Feld aktualisieren
+        employee.team = request.form.get('team')
+        if current_user.is_admin:
+            employee.oe_number = request.form.get('oe_number')
         db.session.commit()
+        log_action("Bearbeiten", f"Mitarbeiter '{employee.name}' (ID: {employee_id}) wurde aktualisiert.")
         flash('Mitarbeiter erfolgreich aktualisiert!', 'success')
         return redirect(url_for('employees'))
     return render_template('edit_employee.html', employee=employee)
 
 @app.route('/employees/delete/<int:employee_id>', methods=['POST'])
+@login_required
 def delete_employee(employee_id):
     employee = Employee.query.get_or_404(employee_id)
+    if not current_user.is_admin and employee.oe_number != current_user.oe_number:
+        flash('Keine Berechtigung.', 'danger'); return redirect(url_for('employees'))
+    name = employee.name
     db.session.delete(employee)
     db.session.commit()
+    log_action("Löschen", f"Mitarbeiter '{name}' (ID: {employee_id}) wurde gelöscht.")
     flash('Mitarbeiter erfolgreich gelöscht!', 'success')
     return redirect(url_for('employees'))
 
+# --- Abteilungsaufgaben ---
+@app.route('/department_tasks')
+@login_required
+def department_tasks():
+    query = DepartmentTask.query
+    if not current_user.is_admin:
+        query = query.filter_by(oe_number=current_user.oe_number)
+    return render_template('department_tasks.html', tasks=query.order_by(DepartmentTask.name).all())
+
+@app.route('/department_tasks/add', methods=['GET', 'POST'])
+@login_required
+def add_department_task():
+    if current_user.is_admin:
+        flash('Administratoren können keine neuen Abteilungsaufgaben anlegen.', 'danger')
+        return redirect(url_for('department_tasks'))
+    if request.method == 'POST':
+        new_task = DepartmentTask(name=request.form['name'], description=request.form['description'], oe_number=current_user.oe_number)
+        db.session.add(new_task)
+        db.session.commit()
+        log_action("Erstellen", f"Neue Aufgabe '{new_task.name}' wurde angelegt.")
+        flash('Aufgabe erfolgreich hinzugefügt!', 'success')
+        return redirect(url_for('department_tasks'))
+    return render_template('add_department_task.html')
+
+@app.route('/department_tasks/edit/<int:task_id>', methods=['GET', 'POST'])
+@login_required
+def edit_department_task(task_id):
+    task = DepartmentTask.query.get_or_404(task_id)
+    if not current_user.is_admin and task.oe_number != current_user.oe_number:
+        flash('Keine Berechtigung.', 'danger'); return redirect(url_for('department_tasks'))
+    if request.method == 'POST':
+        task.name = request.form['name']
+        task.description = request.form['description']
+        if current_user.is_admin:
+            task.oe_number = request.form.get('oe_number')
+        db.session.commit()
+        log_action("Bearbeiten", f"Aufgabe '{task.name}' (ID: {task_id}) wurde aktualisiert.")
+        flash('Aufgabe erfolgreich aktualisiert!', 'success')
+        return redirect(url_for('department_tasks'))
+    return render_template('edit_department_task.html', task=task)
+
+@app.route('/department_tasks/delete/<int:task_id>', methods=['POST'])
+@login_required
+def delete_department_task(task_id):
+    task = DepartmentTask.query.get_or_404(task_id)
+    if not current_user.is_admin and task.oe_number != current_user.oe_number:
+        flash('Keine Berechtigung.', 'danger'); return redirect(url_for('department_tasks'))
+    name = task.name
+    db.session.delete(task)
+    db.session.commit()
+    log_action("Löschen", f"Aufgabe '{name}' (ID: {task_id}) wurde gelöscht.")
+    flash('Aufgabe erfolgreich gelöscht!', 'success')
+    return redirect(url_for('department_tasks'))
+
+# --- Arbeitszeiten ---
+@app.route('/working_hours_changes')
+@login_required
+def working_hours_changes():
+    employees_query = Employee.query
+    changes_query = WorkingHoursChange.query
+    if not current_user.is_admin:
+        employees_query = employees_query.filter_by(oe_number=current_user.oe_number)
+        employee_ids = [e.id for e in employees_query.all()]
+        changes_query = changes_query.filter(WorkingHoursChange.employee_id.in_(employee_ids))
+    
+    employees = employees_query.order_by(Employee.name).all()
+    changes = changes_query.join(Employee).order_by(WorkingHoursChange.change_date.desc(), Employee.name).all()
+    today = datetime.now().strftime('%Y-%m-%d')
+    return render_template('working_hours_changes.html', changes=changes, employees=employees, today=today)
+
+@app.route('/add_working_hours_change', methods=['POST'])
+@login_required
+def add_working_hours_change():
+    employee = Employee.query.get_or_404(request.form['employee_id'])
+    if not current_user.is_admin and employee.oe_number != current_user.oe_number:
+        flash('Keine Berechtigung.', 'danger'); return redirect(url_for('working_hours_changes'))
+    
+    try:
+        new_hours = float(request.form['new_hours'])
+        change_date = datetime.strptime(request.form['change_date'], '%Y-%m-%d').date()
+        old_hours = employee.weekly_working_hours or 0.0
+        employee.weekly_working_hours = new_hours
+        new_change = WorkingHoursChange(employee_id=employee.id, old_hours=old_hours, new_hours=new_hours, change_date=change_date, reason=request.form['reason'])
+        db.session.add(employee)
+        db.session.add(new_change)
+        db.session.commit()
+        log_action("Erstellen", f"Arbeitszeit für '{employee.name}' wurde auf {new_hours}h hinzugefügt.")
+        flash('Arbeitszeitänderung erfolgreich hinzugefügt!', 'success')
+    except Exception as e:
+        db.session.rollback(); flash(f'Ein Fehler ist aufgetreten: {e}', 'danger')
+    return redirect(url_for('working_hours_changes'))
+
+@app.route('/edit_working_hours_change/<int:change_id>', methods=['GET', 'POST'])
+@login_required
+def edit_working_hours_change(change_id):
+    change = WorkingHoursChange.query.get_or_404(change_id)
+    if not current_user.is_admin and change.employee.oe_number != current_user.oe_number:
+        flash('Keine Berechtigung.', 'danger'); return redirect(url_for('working_hours_changes'))
+    
+    employees_query = Employee.query
+    if not current_user.is_admin:
+        employees_query = employees_query.filter_by(oe_number=current_user.oe_number)
+    employees = employees_query.order_by(Employee.name).all()
+    
+    if request.method == 'POST':
+        try:
+            change.employee_id = request.form['employee_id']
+            change.new_hours = float(request.form['new_hours'])
+            change.change_date = datetime.strptime(request.form['change_date'], '%Y-%m-%d').date()
+            change.reason = request.form['reason']
+            db.session.commit()
+            log_action("Bearbeiten", f"Arbeitszeitänderung (ID: {change_id}) für '{change.employee.name}' wurde aktualisiert.")
+            flash('Arbeitszeitänderung erfolgreich aktualisiert!', 'success')
+        except Exception as e:
+            db.session.rollback(); flash(f'Ein Fehler ist aufgetreten: {e}', 'danger')
+        return redirect(url_for('working_hours_changes'))
+    return render_template('edit_working_hours_change.html', change=change, employees=employees)
+
+@app.route('/delete_working_hours_change/<int:change_id>', methods=['POST'])
+@login_required
+def delete_working_hours_change(change_id):
+    change = WorkingHoursChange.query.get_or_404(change_id)
+    if not current_user.is_admin and change.employee.oe_number != current_user.oe_number:
+        flash('Keine Berechtigung.', 'danger'); return redirect(url_for('working_hours_changes'))
+    
+    employee_name = change.employee.name
+    db.session.delete(change)
+    db.session.commit()
+    log_action("Löschen", f"Arbeitszeitänderung (ID: {change_id}) für '{employee_name}' wurde gelöscht.")
+    flash('Arbeitszeitänderung erfolgreich gelöscht!', 'success')
+    return redirect(url_for('working_hours_changes'))
+
+# --- Feiertage, Zuordnungen & Einstellungen ---
+@app.route('/assign_tasks', methods=['GET', 'POST'])
+@login_required
+def assign_tasks():
+    employees_query = Employee.query
+    tasks_query = DepartmentTask.query
+    if not current_user.is_admin:
+        employees_query = employees_query.filter_by(oe_number=current_user.oe_number)
+        tasks_query = tasks_query.filter_by(oe_number=current_user.oe_number)
+    
+    employees = employees_query.order_by(Employee.name).all()
+    tasks = tasks_query.order_by(DepartmentTask.name).all()
+
+    if request.method == 'POST':
+        employee_ids = [e.id for e in employees]
+        EmployeeTask.query.filter(EmployeeTask.employee_id.in_(employee_ids)).delete(synchronize_session=False)
+        for employee in employees:
+            for task in tasks:
+                assignment_type = request.form.get(f'assignment_type_{employee.id}_{task.id}')
+                if assignment_type:
+                    percentage_str = request.form.get(f'percentage_{employee.id}_{task.id}')
+                    new_assignment = EmployeeTask(employee_id=employee.id, task_id=task.id, assignment_type=assignment_type, percentage=float(percentage_str) if percentage_str else None)
+                    db.session.add(new_assignment)
+        db.session.commit()
+        log_action("Bearbeiten", f"Aufgabenzuordnungen für OE '{current_user.oe_number}' wurden aktualisiert.")
+        flash('Aufgaben erfolgreich zugeordnet!', 'success')
+        return redirect(url_for('assign_tasks'))
+    
+    # Restliche Logik zum Anzeigen der Seite
+    assignment_types = {'v': 'Haupt-Verantwortlich', 'v1': 'Vertretung 1', 'v2': 'Vertretung 2', 'o': 'Mitwirkung'}
+    assigned_tasks_data = {e.id: {} for e in employees}
+    total_percentages = {e.id: 0.0 for e in employees}
+    all_assignments = EmployeeTask.query.filter(EmployeeTask.employee_id.in_([e.id for e in employees])).all()
+    for assign in all_assignments:
+        assigned_tasks_data[assign.employee_id][assign.task_id] = {'type': assign.assignment_type, 'percentage': assign.percentage}
+        if assign.percentage:
+            total_percentages[assign.employee_id] += assign.percentage
+    
+    return render_template('assign_tasks.html', employees=employees, tasks=tasks, assigned_tasks_data=assigned_tasks_data, assignment_types=assignment_types, total_percentages_per_employee=total_percentages, settings=Settings.query.first())
 
 @app.route('/holidays')
+@login_required
+@admin_required
 def holidays():
-    # Feiertage aufsteigend nach Datum sortieren (Standard-Sortierung vom Server)
-    holidays = Holiday.query.order_by(Holiday.holiday_date.asc()).all()
-    return render_template('holidays.html', holidays=holidays)
+    return render_template('holidays.html', holidays=Holiday.query.order_by(Holiday.holiday_date.asc()).all())
 
 @app.route('/holidays/add', methods=['GET', 'POST'])
+@login_required
+@admin_required
 def add_holiday():
     if request.method == 'POST':
-        holiday_date_str = request.form['holiday_date']
-        description = request.form['description']
         try:
-            holiday_date = datetime.strptime(holiday_date_str, '%Y-%m-%d').date()
-            new_holiday = Holiday(holiday_date=holiday_date, description=description)
+            date_str = request.form['holiday_date']
+            desc = request.form['description']
+            new_holiday = Holiday(holiday_date=datetime.strptime(date_str, '%Y-%m-%d').date(), description=desc)
             db.session.add(new_holiday)
             db.session.commit()
+            log_action("Erstellen", f"Feiertag '{desc}' am {date_str} wurde hinzugefügt.")
             flash('Feiertag erfolgreich hinzugefügt!', 'success')
-            return redirect(url_for('holidays'))
-        except ValueError:
-            flash('Ungültiges Datumsformat. Bitte YYYY-MM-DD verwenden.', 'danger')
         except Exception as e:
-            flash(f'Fehler beim Hinzufügen des Feiertags: {e}', 'danger')
+            db.session.rollback(); flash(f'Fehler beim Hinzufügen: {e}', 'danger')
+        return redirect(url_for('holidays'))
     return render_template('add_holiday.html')
 
 @app.route('/holidays/delete/<int:holiday_id>', methods=['POST'])
+@login_required
+@admin_required
 def delete_holiday(holiday_id):
     holiday = Holiday.query.get_or_404(holiday_id)
+    date = holiday.holiday_date.strftime('%Y-%m-%d')
     db.session.delete(holiday)
     db.session.commit()
+    log_action("Löschen", f"Feiertag am {date} wurde gelöscht.")
     flash('Feiertag erfolgreich gelöscht!', 'success')
     return redirect(url_for('holidays'))
 
+
 @app.route('/holidays/import', methods=['GET', 'POST'])
+@login_required
+@admin_required
 def import_holidays():
     if request.method == 'POST':
         if 'file' not in request.files:
@@ -177,331 +484,19 @@ def import_holidays():
     
     return render_template('import_holidays.html')
 
-# Diese Route wird die Liste der Arbeitszeitänderungen anzeigen.
-# Sie ist bereits in Ihrem Code vorhanden.
-@app.route('/working_hours_changes')
-def working_hours_changes():
-    # Sortiert die Änderungen nach Datum absteigend, um die neuesten zuerst anzuzeigen
-    changes = WorkingHoursChange.query.order_by(WorkingHoursChange.change_date.desc()).all()
-    employees = Employee.query.all() # Wird für die Dropdown-Liste im Formular benötigt
-    today = datetime.now().strftime('%Y-%m-%d') # Heutiges Datum für das Hinzufügen-Formular
-    return render_template('working_hours_changes.html', changes=changes, employees=employees, today=today)
-
-# Diese Route verarbeitet das Hinzufügen neuer Arbeitszeitänderungen.
-# Sie ist bereits in Ihrem Code vorhanden.
-@app.route('/add_working_hours_change', methods=['POST'])
-def add_working_hours_change():
-    employee_id = request.form['employee_id']
-    new_hours_str = request.form['new_hours']
-    change_date_str = request.form['change_date']
-    reason = request.form['reason']
-
-    try:
-        new_hours = float(new_hours_str)
-        change_date = datetime.strptime(change_date_str, '%Y-%m-%d').date()
-
-        employee = Employee.query.get(employee_id)
-        if not employee:
-            flash(f'Mitarbeiter mit ID {employee_id} nicht gefunden.', 'danger')
-            return redirect(url_for('working_hours_changes'))
-
-        # Die alte Arbeitszeit ist die aktuelle Wochenarbeitszeit des Mitarbeiters VOR dieser Änderung.
-        # Dies setzt voraus, dass employee.weekly_working_hours immer aktuell ist.
-        old_hours = employee.weekly_working_hours if employee.weekly_working_hours is not None else 0.0
-
-        # Aktualisiere die weekly_working_hours des Mitarbeiters in der Employee-Tabelle auf die neuen Stunden
-        employee.weekly_working_hours = new_hours
-        db.session.add(employee) # Füge den geänderten Mitarbeiter zur Session hinzu
-
-        # Füge den Eintrag der Arbeitszeitänderung hinzu
-        new_change = WorkingHoursChange(
-            employee_id=employee_id,
-            old_hours=old_hours,
-            new_hours=new_hours,
-            change_date=change_date,
-            reason=reason
-        )
-        db.session.add(new_change)
-        db.session.commit()
-        flash('Arbeitszeitänderung erfolgreich hinzugefügt und Mitarbeiter aktualisiert!', 'success')
-    except ValueError:
-        flash('Ungültige Eingabe für Arbeitszeit oder Datum. Stellen Sie sicher, dass das Datum im Format JJJJ-MM-TT ist.', 'danger')
-    except Exception as e:
-        db.session.rollback()
-        flash(f'Ein unerwarteter Fehler ist aufgetreten: {e}', 'danger')
-    return redirect(url_for('working_hours_changes'))
 
 
-# NEUE ROUTE: Arbeitszeitänderung bearbeiten
-@app.route('/edit_working_hours_change/<int:change_id>', methods=['GET', 'POST'])
-def edit_working_hours_change(change_id):
-    # Holt den zu bearbeitenden Arbeitszeitänderungs-Eintrag
-    change = WorkingHoursChange.query.get_or_404(change_id)
-    # Holt alle Mitarbeiter für die Dropdown-Liste im Bearbeitungsformular
-    employees = Employee.query.all()
-
-    if request.method == 'POST':
-        # Speichere die ursprüngliche Mitarbeiter-ID und die "neuen Stunden" des Eintrags
-        # (die als "alte Stunden" für den Mitarbeiter vor dieser Änderung gelten würden),
-        # für den Fall, dass der Mitarbeiter oder die Stunden geändert werden.
-        old_employee_id = change.employee_id
-        original_new_hours_of_this_entry = change.new_hours
-
-        # Aktualisiere die Felder des WorkingHoursChange-Eintrags mit den Formulardaten
-        change.employee_id = request.form['employee_id']
-        change.new_hours = float(request.form['new_hours'])
-        change.change_date = datetime.strptime(request.form['change_date'], '%Y-%m-%d').date()
-        change.reason = request.form['reason']
-
-        try:
-            db.session.commit() # Speichere die Änderungen am WorkingHoursChange-Eintrag
-
-            # --- Logik zur Aktualisierung der weekly_working_hours des Mitarbeiters ---
-            # Diese Logik ist entscheidend, um die "aktuelle" Wochenarbeitszeit des Mitarbeiters
-            # in der Employee-Tabelle korrekt zu halten, nachdem eine Änderung bearbeitet wurde.
-
-            # 1. Betrachte den Mitarbeiter, der ursprünglich mit diesem Eintrag verknüpft war (falls er sich geändert hat)
-            if old_employee_id != change.employee_id:
-                # Wenn der Mitarbeiter geändert wurde, müssen wir den alten Mitarbeiter aktualisieren.
-                # Finde die neueste Arbeitszeitänderung für den alten Mitarbeiter, die NICHT der aktuell bearbeitete Eintrag ist.
-                last_change_for_old_employee = WorkingHoursChange.query.filter_by(employee_id=old_employee_id)\
-                                                .filter(WorkingHoursChange.id != change.id)\
-                                                .order_by(WorkingHoursChange.change_date.desc()).first()
-                
-                old_employee = Employee.query.get(old_employee_id)
-                if old_employee:
-                    if last_change_for_old_employee:
-                        # Setze die Wochenarbeitszeit des alten Mitarbeiters auf die Stunden der letzten verbleibenden Änderung
-                        old_employee.weekly_working_hours = last_change_for_old_employee.new_hours
-                    else:
-                        # Wenn keine anderen Änderungen für den alten Mitarbeiter vorhanden sind, setze auf 0.0 (oder einen Standardwert)
-                        old_employee.weekly_working_hours = 0.0
-                    db.session.add(old_employee) # Füge den aktualisierten alten Mitarbeiter zur Session hinzu
-
-            # 2. Betrachte den Mitarbeiter, der JETZT mit diesem Eintrag verknüpft ist
-            # Finde die neueste Arbeitszeitänderung für den (potenziell neuen) Mitarbeiter.
-            # Dies ist wichtig, da die "aktuelle" Arbeitszeit des Mitarbeiters immer die der neuesten Änderung sein sollte.
-            latest_change_for_current_employee = WorkingHoursChange.query.filter_by(employee_id=change.employee_id)\
-                                                    .order_by(WorkingHoursChange.change_date.desc()).first()
-            
-            current_employee = Employee.query.get(change.employee_id)
-            if current_employee:
-                if latest_change_for_current_employee:
-                    # Setze die Wochenarbeitszeit des aktuellen Mitarbeiters auf die Stunden der neuesten Änderung
-                    current_employee.weekly_working_hours = latest_change_for_current_employee.new_hours
-                else:
-                    # Dies sollte normalerweise nicht passieren, wenn ein Eintrag existiert, aber als Fallback
-                    current_employee.weekly_working_hours = 0.0
-                db.session.add(current_employee) # Füge den aktualisierten aktuellen Mitarbeiter zur Session hinzu
-            
-            db.session.commit() # Speichere die Änderungen an den Employee-Objekten
-            flash('Arbeitszeitänderung erfolgreich aktualisiert!', 'success')
-            return redirect(url_for('working_hours_changes'))
-        except ValueError:
-            db.session.rollback() # Rollback bei Validierungsfehlern
-            flash('Ungültige Eingabe für Arbeitszeit oder Datum. Stellen Sie sicher, dass das Datum im Format JJJJ-MM-TT ist.', 'danger')
-            return redirect(url_for('edit_working_hours_change', change_id=change.id))
-        except Exception as e:
-            db.session.rollback() # Rollback bei anderen Fehlern
-            flash(f'Ein unerwarteter Fehler ist aufgetreten: {e}', 'danger')
-            return redirect(url_for('edit_working_hours_change', change_id=change.id))
-
-    # Für GET-Anfragen: Rendere das Bearbeitungsformular
-    return render_template('edit_working_hours_change.html', change=change, employees=employees)
-
-# NEUE ROUTE: Arbeitszeitänderung löschen
-@app.route('/delete_working_hours_change/<int:change_id>', methods=['POST'])
-def delete_working_hours_change(change_id):
-    # Holt den zu löschenden Arbeitszeitänderungs-Eintrag
-    change = WorkingHoursChange.query.get_or_404(change_id)
-    employee_id = change.employee_id # Speichere die Mitarbeiter-ID, bevor der Eintrag gelöscht wird
-
-    try:
-        db.session.delete(change) # Lösche den Eintrag aus der Datenbank
-        db.session.commit() # Bestätige die Löschung
-
-        # --- Logik zur Aktualisierung der weekly_working_hours des Mitarbeiters nach dem Löschen ---
-        # Nach dem Löschen müssen wir die "aktuelle" Wochenarbeitszeit des betroffenen Mitarbeiters neu berechnen.
-        # Finde die neueste Arbeitszeitänderung für den Mitarbeiter, die nach dem Löschen dieses Eintrags noch vorhanden ist.
-        latest_change = WorkingHoursChange.query.filter_by(employee_id=employee_id)\
-                                        .order_by(WorkingHoursChange.change_date.desc()).first()
-        
-        employee = Employee.query.get(employee_id)
-        if employee:
-            if latest_change:
-                # Setze die Wochenarbeitszeit des Mitarbeiters auf die Stunden der neuesten verbleibenden Änderung
-                employee.weekly_working_hours = latest_change.new_hours
-            else:
-                # Wenn keine weiteren Änderungen für diesen Mitarbeiter vorhanden sind,
-                # setze die Wochenarbeitszeit auf 0.0 (oder einen geeigneten Standardwert).
-                employee.weekly_working_hours = 0.0
-            db.session.add(employee) # Füge den aktualisierten Mitarbeiter zur Session hinzu
-            db.session.commit() # Speichere die Änderung am Employee-Objekt
-
-        flash('Arbeitszeitänderung erfolgreich gelöscht!', 'success')
-    except Exception as e:
-        db.session.rollback() # Rollback bei Fehlern
-        flash(f'Ein Fehler ist aufgetreten: {e}', 'danger')
-    return redirect(url_for('working_hours_changes'))
-
-@app.route('/department_tasks')
-def department_tasks():
-    tasks = DepartmentTask.query.all()
-    return render_template('department_tasks.html', tasks=tasks)
-
-
-@app.route('/department_tasks/add', methods=['GET', 'POST'])
-def add_department_task():
-    if request.method == 'POST':
-        name = request.form['name']
-        description = request.form['description']
-        new_task = DepartmentTask(name=name, description=description)
-        try:
-            db.session.add(new_task)
-            db.session.commit()
-            flash('Aufgabe erfolgreich hinzugefügt!', 'success')
-            return redirect(url_for('department_tasks'))
-        except Exception as e:
-            flash(f'Fehler beim Hinzufügen der Aufgabe: {e}', 'danger')
-    return render_template('add_department_task.html')
-
-@app.route('/department_tasks/edit/<int:task_id>', methods=['GET', 'POST'])
-def edit_department_task(task_id):
-    task = DepartmentTask.query.get_or_404(task_id)
-    if request.method == 'POST':
-        task.name = request.form['name']
-        task.description = request.form['description']
-        db.session.commit()
-        flash('Aufgabe erfolgreich aktualisiert!', 'success')
-        return redirect(url_for('department_tasks'))
-    return render_template('edit_department_task.html', task=task)
-
-@app.route('/department_tasks/delete/<int:task_id>', methods=['POST'])
-def delete_department_task(task_id):
-    task = DepartmentTask.query.get_or_404(task_id)
-    db.session.delete(task)
-    db.session.commit()
-    flash('Aufgabe erfolgreich gelöscht!', 'success')
-    return redirect(url_for('department_tasks'))
-
-@app.route('/assign_tasks', methods=['GET', 'POST'])
-def assign_tasks():
-    employees = Employee.query.all()
-    tasks = DepartmentTask.query.all()
-
-    assignment_types = {
-        'v': 'Haupt-Verantwortlich',
-        'v1': 'Vertretung 1',
-        'v2': 'Vertretung 2',
-        'o': 'Mitwirkung'
-    }
-    
-    assigned_tasks_data = {}
-    total_percentages_per_employee = {}
-
-    for employee in employees:
-        assigned_tasks_data[employee.id] = {}
-        current_employee_total_percentage = 0.0
-        for et in employee.assigned_tasks:
-            assigned_tasks_data[employee.id][et.task_id] = {
-                'type': et.assignment_type,
-                'percentage': et.percentage
-            }
-            if et.percentage is not None:
-                current_employee_total_percentage += et.percentage
-        total_percentages_per_employee[employee.id] = current_employee_total_percentage
-
-    # Lade die aktuellen Einstellungen
-    current_settings = Settings.query.first() 
-    if not current_settings: # Falls aus irgendeinem Grund keine Einstellungen gefunden wurden, nutze Defaults
-        current_settings = Settings()
-
-    if request.method == 'POST':
-        new_assignments = []
-        for employee in employees:
-            for task in tasks:
-                assignment_type = request.form.get(f'assignment_type_{employee.id}_{task.id}')
-                percentage_str = request.form.get(f'percentage_{employee.id}_{task.id}')
-
-                if assignment_type:
-                    percentage = None
-                    if percentage_str:
-                        try:
-                            percentage = float(percentage_str)
-                            if percentage < 0 or percentage > 100:
-                                flash(f'Ungültiger Prozentsatz für {employee.name} - {task.name}. Muss zwischen 0 und 100 liegen.', 'danger')
-                                continue
-                        except ValueError:
-                            flash(f'Ungültiges Format für Prozentsatz bei {employee.name} - {task.name}. Bitte Zahl eingeben.', 'danger')
-                            continue
-
-                    new_assignments.append({
-                        'employee_id': employee.id,
-                        'task_id': task.id,
-                        'assignment_type': assignment_type,
-                        'percentage': percentage
-                    })
-
-        db.session.query(EmployeeTask).delete()
-        
-        for assignment in new_assignments:
-            new_assignment_obj = EmployeeTask(
-                employee_id=assignment['employee_id'],
-                task_id=assignment['task_id'],
-                assignment_type=assignment['assignment_type'],
-                percentage=assignment['percentage']
-            )
-            db.session.add(new_assignment_obj)
-        
-        db.session.commit()
-        flash('Aufgaben und Prozentsätze erfolgreich zugeordnet!', 'success')
-        return redirect(url_for('assign_tasks'))
-    
-    return render_template('assign_tasks.html', 
-                           employees=employees, 
-                           tasks=tasks, 
-                           assigned_tasks_data=assigned_tasks_data,
-                           assignment_types=assignment_types,
-                           total_percentages_per_employee=total_percentages_per_employee,
-                           settings=current_settings) # NEU: Einstellungen übergeben
-
-# NEUE ROUTE für Einstellungen
 @app.route('/settings', methods=['GET', 'POST'])
+@login_required
+@admin_required
 def settings():
     current_settings = Settings.query.first()
-    if not current_settings:
-        current_settings = Settings() # Fallback, falls kein Eintrag existiert
-
     if request.method == 'POST':
-        try:
-            red = float(request.form['red_threshold'])
-            green_min = float(request.form['green_min_threshold'])
-            yellow_max = float(request.form['yellow_max_threshold'])
-
-            # Grundlegende Validierung
-            if not (0 <= green_min <= 100) or not (0 <= yellow_max <= 100) or not (0 <= red <= 1000): # Red kann auch über 100 sein
-                flash('Alle Grenzwerte müssen Zahlen zwischen 0 und 100 (oder größer für Rot) sein!', 'danger')
-                return redirect(url_for('settings'))
-            
-            if green_min > red:
-                flash('Grün (min) darf nicht größer als Rot (über) sein.', 'danger')
-                return redirect(url_for('settings'))
-
-            if yellow_max >= green_min: # Gelb_Max ist der obere Wert für Gelb, muss unter Grün_Min liegen
-                 flash('Gelb (max) muss kleiner als Grün (min) sein.', 'danger')
-                 return redirect(url_for('settings'))
-
-            current_settings.red_threshold = red
-            current_settings.green_min_threshold = green_min
-            current_settings.yellow_max_threshold = yellow_max
-            
-            db.session.commit()
-            flash('Einstellungen erfolgreich gespeichert!', 'success')
-            return redirect(url_for('settings'))
-        except ValueError:
-            flash('Ungültige Eingabe. Bitte geben Sie gültige Zahlen ein.', 'danger')
-        except Exception as e:
-            flash(f'Ein Fehler ist aufgetreten: {e}', 'danger')
-
+        current_settings.red_threshold = float(request.form['red_threshold'])
+        current_settings.green_min_threshold = float(request.form['green_min_threshold'])
+        current_settings.yellow_max_threshold = float(request.form['yellow_max_threshold'])
+        db.session.commit()
+        log_action("Bearbeiten", "Die Schwellenwerte für die Prozent-Summen wurden geändert.")
+        flash('Einstellungen erfolgreich gespeichert!', 'success')
+        return redirect(url_for('settings'))
     return render_template('settings.html', settings=current_settings)
-

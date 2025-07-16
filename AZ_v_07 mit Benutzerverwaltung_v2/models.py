@@ -1,19 +1,52 @@
 # models.py
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+from flask_login import UserMixin
+from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
 
+class User(db.Model, UserMixin):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(100), unique=True, nullable=False)
+    password_hash = db.Column(db.String(128))
+    oe_number = db.Column(db.String(50), nullable=False)
+    is_admin = db.Column(db.Boolean, default=False)
+
+    def set_password(self, password):
+        # HIER IST DIE ÄNDERUNG: Explizite Angabe der Hash-Methode
+        self.password_hash = generate_password_hash(password, method='pbkdf2:sha256')
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    def __repr__(self):
+        return f'<User {self.username}>'
+
+class Log(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True) # Nullable, falls Aktionen ohne Benutzerkontext stattfinden
+    username = db.Column(db.String(100), nullable=False)
+    action = db.Column(db.String(50), nullable=False)
+    description = db.Column(db.String(500), nullable=False)
+
+    user = db.relationship('User', backref='logs')
+
+    def __repr__(self):
+        return f'<Log {self.timestamp} - {self.username} - {self.action}>'
+    
 class Employee(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     job_title = db.Column(db.String(100), nullable=False)
-    weekly_working_hours = db.Column(db.Float, default=0.0) 
-    team = db.Column(db.String(100), nullable=True) 
+    weekly_working_hours = db.Column(db.Float, default=0.0)
+    team = db.Column(db.String(100), nullable=True)
+    oe_number = db.Column(db.String(50), nullable=False) # NEU
 
     # Beziehungen
-    working_hours_changes = db.relationship('WorkingHoursChange', backref='employee', lazy=True)
-    assigned_tasks = db.relationship('EmployeeTask', backref='employee', lazy=True)
+    working_hours_changes = db.relationship('WorkingHoursChange', backref='employee', lazy=True, cascade="all, delete-orphan")
+    assigned_tasks = db.relationship('EmployeeTask', backref='employee', lazy=True, cascade="all, delete-orphan")
 
     def __repr__(self):
         return f'<Employee {self.name}>'
@@ -21,10 +54,10 @@ class Employee(db.Model):
 class WorkingHoursChange(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     employee_id = db.Column(db.Integer, db.ForeignKey('employee.id'), nullable=False)
-    old_hours = db.Column(db.Float, nullable=True) # NEU HINZUGEFÜGT: Alte Stunden
+    old_hours = db.Column(db.Float, nullable=True)
     new_hours = db.Column(db.Float, nullable=False)
     change_date = db.Column(db.Date, nullable=False)
-    reason = db.Column(db.String(500), nullable=True) # Grund der Änderung
+    reason = db.Column(db.String(500), nullable=True)
 
     def __repr__(self):
         return f'<WorkingHoursChange {self.employee_id} on {self.change_date} from {self.old_hours} to {self.new_hours}>'
@@ -41,9 +74,10 @@ class DepartmentTask(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(150), nullable=False, unique=True)
     description = db.Column(db.Text, nullable=True)
+    oe_number = db.Column(db.String(50), nullable=False) # NEU
 
     # Beziehung
-    assigned_tasks = db.relationship('EmployeeTask', backref='task', lazy=True)
+    assigned_tasks = db.relationship('EmployeeTask', backref='task', lazy=True, cascade="all, delete-orphan")
 
     def __repr__(self):
         return f'<DepartmentTask {self.name}>'
@@ -63,7 +97,7 @@ class EmployeeTask(db.Model):
 
 class Settings(db.Model):
     id = db.Column(db.Integer, primary_key=True, default=1)
-    red_threshold = db.Column(db.Float, default=100.0)
+    red_threshold = db.Column(db.Float, default=100.1)
     green_min_threshold = db.Column(db.Float, default=80.0)
     yellow_max_threshold = db.Column(db.Float, default=79.9)
 

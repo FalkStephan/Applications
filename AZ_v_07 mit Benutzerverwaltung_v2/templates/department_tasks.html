@@ -52,7 +52,7 @@
         <a href="{{ url_for('add_department_task') }}" class="button">Aufgabe hinzufügen</a>
 
         <div class="search-container">
-            <input type="text" id="taskSearch" onkeyup="filterTable()" placeholder="Aufgabe suchen...">
+            <input type="text" id="taskSearch" onkeyup="filterTable()" placeholder="Aufgabe, Beschreibung, OE suchen...">
         </div>
 
         <table id="departmentTasksTable">
@@ -60,6 +60,7 @@
                 <tr>
                     <th class="sortable-header" data-column="name">Name</th>
                     <th class="sortable-header" data-column="description">Beschreibung</th>
+                    <th class="sortable-header" data-column="description">OE</th>
                     <th>Aktionen</th>
                 </tr>
             </thead>
@@ -68,6 +69,7 @@
                 <tr>
                     <td>{{ task.name }}</td>
                     <td>{{ task.description }}</td>
+                    <td>{{ task.oe_number }}</td>
                     <td>
                         <a href="{{ url_for('edit_department_task', task_id=task.id) }}" class="button small">Bearbeiten</a>
                         <form action="{{ url_for('delete_department_task', task_id=task.id) }}" method="post" style="display:inline;">
@@ -94,12 +96,16 @@
             for (let i = 1; i < tr.length; i++) { // Start at 1 to skip header row
                 const tdName = tr[i].getElementsByTagName('td')[0]; // Name column
                 const tdDescription = tr[i].getElementsByTagName('td')[1]; // Description column
+                const tdOenumber = tr[i].getElementsByTagName('td')[2]; // OE column
 
                 if (tdName || tdDescription) {
                     const nameText = tdName ? tdName.textContent || tdName.innerText : '';
                     const descriptionText = tdDescription ? tdDescription.textContent || tdDescription.innerText : '';
+                    const oenumber = tdOenumber ? tdOenumber.textContent || tdOenumber.innerText : '';
 
-                    if (nameText.toLowerCase().indexOf(filter) > -1 || descriptionText.toLowerCase().indexOf(filter) > -1) {
+                    if (nameText.toLowerCase().indexOf(filter) > -1 || 
+                        descriptionText.toLowerCase().indexOf(filter) > -1 || 
+                        oenumber.toLowerCase().indexOf(filter) > -1) {
                         tr[i].style.display = '';
                     } else {
                         tr[i].style.display = 'none';
