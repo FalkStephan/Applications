@@ -60,9 +60,6 @@
         .action-buttons .edit-btn {
             background-color: #3498db; /* Blau */
         }
-        .action-buttons .delete-btn {
-            background-color: #e74c3c; /* Rot */
-        }
     </style>
 {% endblock %}
 
@@ -89,7 +86,7 @@
             </select>
 
             <label for="new_hours">Neue Wochenarbeitszeit:</label>
-            <input type="number" id="new_hours" name="new_hours" step="0.01" min="0" max="1" required>
+            <input type="number" id="new_hours" name="new_hours" step="0.01" min="0" required>
 
             <label for="change_date">Datum der Änderung:</label>
             <input type="date" id="change_date" name="change_date" value="{{ today }}" required>
@@ -114,7 +111,6 @@
                     <th>Alte Stunden</th> {# Nicht sortierbar, da es nur der Wert der letzten Änderung ist #}
                     <th class="sortable-header" data-column="new_hours" data-column-type="number">Neue Stunden</th>
                     <th class="sortable-header" data-column="change_date" data-column-type="date">Datum der Änderung</th>
-                    <!--<th class="sortable-header" data-column="reason">Grund</th>-->
                     <th>Aktionen</th> {# NEU: Aktionen-Spalte #}
                 </tr>
             </thead>
@@ -125,10 +121,9 @@
                         <td>{{ "%.2f" | format(change.old_hours) }}</td>
                         <td>{{ "%.2f" | format(change.new_hours) }}</td>
                         <td data-sort="{{ change.change_date.strftime('%Y-%m-%d') }}">{{ change.change_date.strftime('%d.%m.%Y') }}</td>
-                        <!--<td>{{ change.reason }}</td>-->
                         <td class="action-buttons">
                             <a href="{{ url_for('edit_working_hours_change', change_id=change.id) }}" class="button small">Bearbeiten</a>
-                            <form action="{{ url_for('delete_working_hours_change', change_id=change.id) }}" method="POST" style="display:inline;">
+                            <form action="{{ url_for('delete_working_hours_change', change_id=change.id) }}" method="POST" style="display:inline; background:none; border:none; padding:0; margin:0;">
                                 <button type="submit" class="button small delete" onclick="return confirm('Sind Sie sicher, dass Sie diese Arbeitszeitänderung löschen möchten?');">Löschen</button>
                             </form>
                         </td>
