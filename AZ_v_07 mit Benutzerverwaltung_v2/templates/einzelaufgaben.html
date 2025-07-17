@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+
+{% block title %}Einzelaufgaben{% endblock %}
+
+{% block head_extra_style %}
+<style>
+    .action-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .search-container { display: flex; gap: 10px; align-items: center; }
+    .search-container input, .search-container select { padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+    .sortable-header { cursor: pointer; position: relative; padding-right: 20px; }
+    .sortable-header::after { content: ''; display: inline-block; position: absolute; right: 5px; top: 50%; transform: translateY(-50%); width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; vertical-align: middle; }
+    .sortable-header.asc::after { border-bottom: 5px solid #000; }
+    .sortable-header.desc::after { border-top: 5px solid #000; }
+    .printable-area { display: none; font-family: Arial, sans-serif; color: #333; width: 800px; padding: 20px; }
+    .printable-area h2 { color: #0056b3; }
+    .printable-area table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    .printable-area th, .printable-area td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    .printable-area th { background-color: #f2f2f2; }
+    .progress-cell {
+        font-weight: bold;
+        color: white;
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+        text-align: center !important;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Einzelaufgaben für OE: {{ current_user.oe_number }}</h1>
+
+<div class="action-bar">
+    <a href="{{ url_for('add_einzelaufgabe') }}" class="button">Neue Aufgabe anlegen</a>
+    <button id="printListButton" class="button">Liste als PDF drucken</button>
+</div>
+
+<form method="get" action="{{ url_for('einzelaufgaben') }}">
+    <div class="search-container">
+        <input type="text" id="searchInput" name="search" placeholder="Aufgabe, Thema suchen..." value="{{ request.args.get('search', '') }}">
+        <select name="status">
+            <option value="">-- Alle Status --</option>
+            {% for s in stati %}<option value="{{ s.id }}" {% if request.args.get('status') == s.id|string %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+        </select>
+        <select name="prio">
+            <option value="">-- Alle Prioritäten --</option>
+            {% for p in priorities %}<option value="{{ p.id }}" {% if request.args.get('prio') == p.id|string %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+        </select>
+        <button type="submit" class="button">Filtern</button>
+        <a href="{{ url_for('einzelaufgaben') }}" class="button">Reset</a>
+    </div>
+</form>
+
+<table id="einzelaufgabenTable">
+    <thead>
+        <tr>
+            <th class="sortable-header" data-column="aufgabe">Aufgabe</th>
+            <th class="sortable-header" data-column="themenfeld">Themenfeld</th>
+            <th class="sortable-header" data-column="status">Status</th>
+            <th class="sortable-header" data-column="prioritaet">Priorität</th>
+            <th class="sortable-header" data-column="fertigstellungsgrad">Fertigstellung</th>
+            <th class="sortable-header" data-column="datum_bis">Fällig bis</th>
+            <th class="sortable-header" data-column="aufwand_pt">Aufwand (PT)</th>
+            <th class="sortable-header" data-column="unassigned_pt">Offener Aufwand (PT)</th>
+            <th>Aktionen</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for task in tasks %}
+        <tr>
+            <td>{{ task.aufgabe }}</td>
+            <td>{{ task.themenfeld or '-' }}</td>
+            <td>{{ task.status.name }}</td>
+            <td>{{ task.prioritaet.name if task.prioritaet else '-' }}</td>
+            {% set hue = (task.fertigstellungsgrad or 0) * 1.2 %}
+            <td class="progress-cell" style="background-color: hsl({{ hue }}, 70%, 50%);">
+                {{ task.fertigstellungsgrad or 0 }}%
+            </td>
+            <td data-sort="{{ task.datum_bis.strftime('%Y-%m-%d') if task.datum_bis else '9999-12-31' }}">{{ task.datum_bis.strftime('%d.%m.%Y') if task.datum_bis else '-' }}</td>
+            <td data-sort="{{ task.aufwand_pt or 0 }}">{{ "%.2f" | format(task.aufwand_pt) if task.aufwand_pt is not none else '-' }}</td>
+            <td data-sort="{{ task.unassigned_pt or 0 }}">{{ "%.2f" | format(task.unassigned_pt) }}</td>
+            <td>
+                <a href="{{ url_for('edit_einzelaufgabe', task_id=task.id) }}" class="button small">Bearbeiten</a>
+                <button onclick="printTaskToPdf({{ task.id }})" class="button small">Drucken</button>
+                <form action="{{ url_for('delete_einzelaufgabe', task_id=task.id) }}" method="post" style="display:inline;" onsubmit="return confirm('Soll diese Aufgabe wirklich gelöscht werden?');">
+                    <button type="submit" class="button small delete">Löschen</button>
+                </form>
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9">Keine Aufgaben für die aktuellen Filter gefunden.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% for task in tasks %}
+<div id="printable-content-{{ task.id }}" class="printable-area">
+    <h2>Detailansicht Einzelaufgabe</h2>
+    <p><strong>OE:</strong> {{ task.oe_number }}</p>
+    <hr>
+    <p><strong>Aufgabe:</strong> {{ task.aufgabe }}</p>
+    <p><strong>Themenfeld:</strong> {{ task.themenfeld or 'N/A' }}</p>
+    <table>
+        <tr>
+            <th>Status</th>
+            <td>{{ task.status.name }}</td>
+            <th>Priorität</th>
+            <td>{{ task.prioritaet.name if task.prioritaet else 'N/A' }}</td>
+        </tr>
+        <tr>
+            <th>Datum von</th>
+            <td>{{ task.datum_von.strftime('%d.%m.%Y') if task.datum_von else 'N/A' }}</td>
+            <th>Datum bis</th>
+            <td>{{ task.datum_bis.strftime('%d.%m.%Y') if task.datum_bis else 'N/A' }}</td>
+        </tr>
+        <tr>
+            <th>Fertigstellungsgrad</th>
+            <td>{{ task.fertigstellungsgrad or 0 }}%</td>
+            <th>Gesamtaufwand</th>
+            <td>{{ "%.2f" | format(task.aufwand_pt) if task.aufwand_pt is not none else '0.00' }} PT / {{ "%.2f" | format(task.aufwand_stunden) if task.aufwand_stunden is not none else '0.00' }} Std.</td>
+        </tr>
+    </table>
+    <h3>Aufwandsverteilung</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Mitarbeiter</th>
+                <th>Stunden</th>
+                <th>Personentage (PT)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% set total_assigned_hours = namespace(value=0) %}
+            {% for zuordnung in task.mitarbeiter_zuordnung %}
+            <tr>
+                <td>{{ zuordnung.employee.name }}</td>
+                <td>{{ "%.2f" | format(zuordnung.stunden) if zuordnung.stunden is not none else '-' }}</td>
+                <td>{{ "%.2f" | format(zuordnung.pt) if zuordnung.pt is not none else '-' }}</td>
+            </tr>
+            {% set total_assigned_hours.value = total_assigned_hours.value + (zuordnung.stunden or 0) %}
+            {% endfor %}
+            <tr style="font-weight: bold; background-color: #f2f2f2;">
+                <td>Nicht zugeordnet</td>
+                <td>{{ "%.2f" | format((task.aufwand_stunden or 0) - total_assigned_hours.value) }}</td>
+                <td>{{ "%.2f" | format(((task.aufwand_stunden or 0) - total_assigned_hours.value) / 8) }}</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endfor %}
+{% endblock %}
+
+{% block extra_script %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Skript für die Sortierung (unverändert)
+    const table = document.getElementById('einzelaufgabenTable');
+    if (table) {
+        const headers = table.querySelectorAll('.sortable-header');
+        const urlParams = new URLSearchParams(window.location.search);
+        let currentSort = urlParams.get('sort') || 'datum_bis';
+        let currentDir = urlParams.get('dir') || 'asc';
+        headers.forEach(header => {
+            const column = header.dataset.column;
+            if (column === currentSort) {
+                header.classList.add(currentDir);
+            }
+            header.addEventListener('click', () => {
+                let newDir = 'asc';
+                if (column === currentSort && currentDir === 'asc') {
+                    newDir = 'desc';
+                }
+                urlParams.set('sort', column);
+                urlParams.set('dir', newDir);
+                window.location.search = urlParams.toString();
+            });
+        });
+    }
+
+    // NEU: Event Listener für den Druck-Button der Liste
+    const printListButton = document.getElementById('printListButton');
+    if (printListButton) {
+        printListButton.addEventListener('click', printTaskListToPdf);
+    }
+});
+
+// Funktion zum Drucken einer einzelnen Aufgabe (unverändert)
+function printTaskToPdf(taskId) {
+    const { jsPDF } = window.jspdf;
+    const printableElement = document.getElementById('printable-content-' + taskId);
+    printableElement.style.display = 'block';
+    html2canvas(printableElement, { scale: 2 }).then(canvas => {
+        printableElement.style.display = 'none';
+        const imgData = canvas.toDataURL('image/png');
+        const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+        const imgWidth = 190;
+        const imgHeight = canvas.height * imgWidth / canvas.width;
+        doc.addImage(imgData, 'PNG', 10, 5, imgWidth, imgHeight);
+        doc.save(`Einzelaufgabe_${taskId}.pdf`);
+    });
+}
+
+// NEU: Funktion zum Drucken der gesamten Liste
+function printTaskListToPdf() {
+    const { jsPDF } = window.jspdf;
+    const table = document.getElementById('einzelaufgabenTable');
+    const printButton = document.getElementById('printListButton');
+
+    // Feedback für den Nutzer, dass der Prozess läuft
+    printButton.textContent = 'PDF wird erstellt...';
+    printButton.disabled = true;
+
+    html2canvas(table, {
+        scale: 2,
+        onclone: (document) => {
+            // Die "Aktionen"-Spalte im Klon ausblenden, um sie nicht im PDF zu haben
+            document.querySelectorAll('#einzelaufgabenTable th:last-child, #einzelaufgabenTable td:last-child').forEach(el => {
+                el.style.display = 'none';
+            });
+        }
+    }).then(canvas => {
+        const imgData = canvas.toDataURL('image/png');
+        const doc = new jsPDF({
+            orientation: 'landscape', // Querformat für breite Tabellen
+            unit: 'mm',
+            format: 'a4'
+        });
+
+        const imgWidth = 277; // Breite für A4 Querformat mit Rand
+        const pageHeight = 210;
+        const imgHeight = canvas.height * imgWidth / canvas.width;
+        let heightLeft = imgHeight;
+        let position = 10;
+
+        doc.addImage(imgData, 'PNG', 10, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+
+        while (heightLeft > -10) { // kleiner Puffer
+            position = heightLeft - imgHeight + 10;
+            doc.addPage();
+            doc.addImage(imgData, 'PNG', 10, position, imgWidth, imgHeight);
+            heightLeft -= pageHeight;
+        }
+
+        doc.save('Einzelaufgaben_Liste.pdf');
+        
+        // Button-Zustand wiederherstellen
+        printButton.textContent = 'Liste als PDF drucken';
+        printButton.disabled = false;
+
+    }).catch(err => {
+        console.error("Fehler beim PDF-Export:", err);
+        alert("Es gab einen Fehler beim Erstellen des PDFs.");
+        // Button-Zustand auch bei Fehler wiederherstellen
+        printButton.textContent = 'Liste als PDF drucken';
+        printButton.disabled = false;
+    });
+}
+</script>
+{% endblock %}

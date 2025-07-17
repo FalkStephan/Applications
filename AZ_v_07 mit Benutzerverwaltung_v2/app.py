@@ -1,22 +1,36 @@
 # app.py
 from flask import Flask, render_template, request, redirect, url_for, flash
-from models import db, Employee, WorkingHoursChange, Holiday, DepartmentTask, EmployeeTask, Settings, User, Log
-from datetime import datetime
+import locale
+from models import db, Employee, WorkingHoursChange, Holiday, DepartmentTask, EmployeeTask, Settings, User, Log, Status, Prioritaet, Einzelaufgabe, EinzelaufgabeMitarbeiter
+from datetime import datetime, date, timedelta
 import csv
 from io import TextIOWrapper
 from flask_migrate import Migrate
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from functools import wraps
+from sqlalchemy import func, or_
+from dateutil.relativedelta import relativedelta
+
+# Setzt die Sprache für Zeit- und Datumsformate auf Deutsch
+try:
+    locale.setlocale(locale.LC_TIME, 'de_DE.UTF-8')
+except locale.Error:
+    print("Warnung: Deutsches locale 'de_DE.UTF-8' nicht gefunden. Monatsnamen könnten auf Englisch sein.")
+    try:
+        locale.setlocale(locale.LC_TIME, 'de_DE')
+    except locale.Error:
+        print("Warnung: Fallback auf 'de_DE' ebenfalls fehlgeschlagen.")
+        locale.setlocale(locale.LC_TIME, '')
+
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///employees.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = 'a_very_secret_key_change_it' # Unbedingt ändern!
+app.config['SECRET_KEY'] = 'a_very_secret_key_change_it'
 
 db.init_app(app)
 migrate = Migrate(app, db)
 
-# Flask-Login Initialisierung
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
@@ -26,7 +40,6 @@ login_manager.login_message = "Bitte melden Sie sich an, um diese Seite aufzuruf
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# Datenbanktabellen erstellen und Standard-Admin anlegen
 with app.app_context():
     db.create_all()
     if not Settings.query.first():
@@ -38,6 +51,25 @@ with app.app_context():
         db.session.add(admin_user)
         db.session.commit()
         print("Default admin user 'admin' with password 'admin' created.")
+    if not Status.query.first():
+        default_stati = [
+            Status(name='Offen', reihenfolge=10),
+            Status(name='In Bearbeitung', reihenfolge=20),
+            Status(name='Erledigt', reihenfolge=30)
+        ]
+        db.session.bulk_save_objects(default_stati)
+        db.session.commit()
+        print("Default status values created.")
+    if not Prioritaet.query.first():
+        default_priorities = [
+            Prioritaet(name='Hoch', reihenfolge=10),
+            Prioritaet(name='Mittel', reihenfolge=20),
+            Prioritaet(name='Niedrig', reihenfolge=30)
+        ]
+        db.session.bulk_save_objects(default_priorities)
+        db.session.commit()
+        print("Default priority values created.")
+
 
 # --- Hilfsfunktionen & Decorators ---
 def admin_required(f):
@@ -50,7 +82,6 @@ def admin_required(f):
     return decorated_function
 
 def log_action(action, description):
-    """Manuelle Funktion zum Erstellen von Log-Einträgen."""
     try:
         log = Log(
             user_id=current_user.id if current_user.is_authenticated else None,
@@ -63,6 +94,17 @@ def log_action(action, description):
     except Exception as e:
         app.logger.error(f"Fehler beim Schreiben ins Logbuch: {e}")
         db.session.rollback()
+
+def get_workdays(start_date, end_date):
+    if not start_date or not end_date or start_date > end_date:
+        return 0
+    workdays = 0
+    current_date = start_date
+    while current_date <= end_date:
+        if current_date.weekday() < 5:
+            workdays += 1
+        current_date += timedelta(days=1)
+    return workdays
 
 # --- Authentifizierung & Hauptrouten ---
 @app.route('/login', methods=['GET', 'POST'])
@@ -290,13 +332,18 @@ def add_working_hours_change():
     try:
         new_hours = float(request.form['new_hours'])
         change_date = datetime.strptime(request.form['change_date'], '%Y-%m-%d').date()
-        old_hours = employee.weekly_working_hours or 0.0
+        
+        last_change = WorkingHoursChange.query.filter(
+            WorkingHoursChange.employee_id == employee.id
+        ).order_by(WorkingHoursChange.change_date.desc()).first()
+        old_hours = last_change.new_hours if last_change else 0.0
+
         employee.weekly_working_hours = new_hours
-        new_change = WorkingHoursChange(employee_id=employee.id, old_hours=old_hours, new_hours=new_hours, change_date=change_date, reason=request.form['reason'])
-        db.session.add(employee)
+
+        new_change = WorkingHoursChange(employee_id=employee.id, old_hours=old_hours, new_hours=new_hours, change_date=change_date, reason=request.form.get('reason'))
         db.session.add(new_change)
         db.session.commit()
-        log_action("Erstellen", f"Arbeitszeit für '{employee.name}' wurde auf {new_hours}h hinzugefügt.")
+        log_action("Erstellen", f"Arbeitszeit für '{employee.name}' wurde auf {new_hours}h geändert.")
         flash('Arbeitszeitänderung erfolgreich hinzugefügt!', 'success')
     except Exception as e:
         db.session.rollback(); flash(f'Ein Fehler ist aufgetreten: {e}', 'danger')
@@ -370,7 +417,6 @@ def assign_tasks():
         flash('Aufgaben erfolgreich zugeordnet!', 'success')
         return redirect(url_for('assign_tasks'))
     
-    # Restliche Logik zum Anzeigen der Seite
     assignment_types = {'v': 'Haupt-Verantwortlich', 'v1': 'Vertretung 1', 'v2': 'Vertretung 2', 'o': 'Mitwirkung'}
     assigned_tasks_data = {e.id: {} for e in employees}
     total_percentages = {e.id: 0.0 for e in employees}
@@ -434,30 +480,27 @@ def import_holidays():
             return redirect(request.url)
         
         if file and file.filename.endswith('.csv'):
-            # Datei als Textdatei lesen
-            csv_file = TextIOWrapper(file.stream.read(), 'utf-8')
+            csv_file = TextIOWrapper(file.stream, 'utf-8')
             reader = csv.reader(csv_file)
             
             imported_count = 0
             skipped_count = 0
             errors = []
 
-            for i, row in enumerate(reader):
-                if i == 0: # Kopfzeile überspringen
-                    continue
-                
-                if len(row) >= 1: # Mindestens das Datum muss vorhanden sein
+            next(reader, None) 
+            
+            for row in reader:
+                if len(row) >= 1: 
                     date_str = row[0].strip()
                     description = row[1].strip() if len(row) > 1 else ''
 
                     try:
                         holiday_date = datetime.strptime(date_str, '%Y-%m-%d').date()
                         
-                        # Prüfen, ob Feiertag bereits existiert (optional, aber gut gegen Duplikate)
                         existing_holiday = Holiday.query.filter_by(holiday_date=holiday_date).first()
                         if existing_holiday:
                             skipped_count += 1
-                            errors.append(f"Zeile {i+1}: Feiertag am {date_str} existiert bereits und wurde übersprungen.")
+                            errors.append(f"Feiertag am {date_str} existiert bereits und wurde übersprungen.")
                             continue
 
                         new_holiday = Holiday(holiday_date=holiday_date, description=description)
@@ -465,26 +508,28 @@ def import_holidays():
                         imported_count += 1
                     except ValueError:
                         skipped_count += 1
-                        errors.append(f"Zeile {i+1}: Ungültiges Datumsformat '{date_str}'. Erwartet YYYY-MM-DD. Zeile übersprungen.")
+                        errors.append(f"Ungültiges Datumsformat '{date_str}'. Erwartet YYYY-MM-DD. Zeile übersprungen.")
                     except Exception as e:
                         skipped_count += 1
-                        errors.append(f"Zeile {i+1}: Fehler beim Importieren: {e}. Zeile übersprungen.")
+                        errors.append(f"Fehler beim Importieren: {e}. Zeile übersprungen.")
             
-            db.session.commit() # Alle importierten Feiertage auf einmal speichern
-            
-            flash(f'{imported_count} Feiertage erfolgreich importiert.', 'success')
-            if skipped_count > 0:
-                flash(f'{skipped_count} Feiertage übersprungen oder mit Fehlern.', 'warning')
-            for error in errors:
-                flash(error, 'danger')
-            
+            try:
+                db.session.commit() 
+                log_action("Import", f"{imported_count} Feiertage importiert, {skipped_count} übersprungen.")
+                flash(f'{imported_count} Feiertage erfolgreich importiert.', 'success')
+                if skipped_count > 0:
+                    flash(f'{skipped_count} Feiertage übersprungen oder mit Fehlern.', 'warning')
+                for error in errors:
+                    flash(error, 'danger')
+            except Exception as e:
+                db.session.rollback()
+                flash(f"Fehler beim Speichern der importierten Feiertage: {e}", "danger")
+
             return redirect(url_for('holidays'))
         else:
             flash('Ungültiger Dateityp. Bitte eine CSV-Datei hochladen.', 'danger')
     
     return render_template('import_holidays.html')
-
-
 
 @app.route('/settings', methods=['GET', 'POST'])
 @login_required
@@ -492,11 +537,362 @@ def import_holidays():
 def settings():
     current_settings = Settings.query.first()
     if request.method == 'POST':
-        current_settings.red_threshold = float(request.form['red_threshold'])
-        current_settings.green_min_threshold = float(request.form['green_min_threshold'])
-        current_settings.yellow_max_threshold = float(request.form['yellow_max_threshold'])
-        db.session.commit()
-        log_action("Bearbeiten", "Die Schwellenwerte für die Prozent-Summen wurden geändert.")
-        flash('Einstellungen erfolgreich gespeichert!', 'success')
+        if 'save_order' in request.form:
+            for status in Status.query.all():
+                new_order = request.form.get(f'status_order_{status.id}')
+                if new_order is not None:
+                    status.reihenfolge = int(new_order)
+            for prio in Prioritaet.query.all():
+                new_order = request.form.get(f'prio_order_{prio.id}')
+                if new_order is not None:
+                    prio.reihenfolge = int(new_order)
+            db.session.commit()
+            log_action("Bearbeiten", "Reihenfolge für Status/Prioritäten aktualisiert.")
+            flash('Reihenfolge erfolgreich gespeichert!', 'success')
+        elif 'red_threshold' in request.form:
+            current_settings.red_threshold = float(request.form['red_threshold'])
+            current_settings.green_min_threshold = float(request.form['green_min_threshold'])
+            current_settings.yellow_max_threshold = float(request.form['yellow_max_threshold'])
+            db.session.commit()
+            log_action("Bearbeiten", "Die Schwellenwerte für die Prozent-Summen wurden geändert.")
+            flash('Schwellenwerte erfolgreich gespeichert!', 'success')
+        elif 'new_status_name' in request.form and request.form['new_status_name']:
+            if not Status.query.filter_by(name=request.form['new_status_name']).first():
+                new_status = Status(name=request.form['new_status_name'], reihenfolge=int(request.form.get('new_status_order', 0)))
+                db.session.add(new_status)
+                db.session.commit()
+                log_action("Erstellen", f"Neuer Status '{new_status.name}' hinzugefügt.")
+                flash('Neuer Status hinzugefügt.', 'success')
+            else:
+                flash('Dieser Status existiert bereits.', 'warning')
+        elif 'new_prio_name' in request.form and request.form['new_prio_name']:
+            if not Prioritaet.query.filter_by(name=request.form.get('new_prio_name')).first():
+                new_prio = Prioritaet(name=request.form.get('new_prio_name'), reihenfolge=int(request.form.get('new_prio_order', 0)))
+                db.session.add(new_prio)
+                db.session.commit()
+                log_action("Erstellen", f"Neue Priorität '{new_prio.name}' hinzugefügt.")
+                flash('Neue Priorität hinzugefügt.', 'success')
+            else:
+                flash('Diese Priorität existiert bereits.', 'warning')
         return redirect(url_for('settings'))
-    return render_template('settings.html', settings=current_settings)
+    
+    stati = Status.query.order_by(Status.reihenfolge, Status.name).all()
+    priorities = Prioritaet.query.order_by(Prioritaet.reihenfolge, Prioritaet.name).all()
+    return render_template('settings.html', settings=current_settings, stati=stati, priorities=priorities)
+
+@app.route('/settings/status/delete/<int:status_id>', methods=['POST'])
+@login_required
+@admin_required
+def delete_status(status_id):
+    status = Status.query.get_or_404(status_id)
+    if status.einzelaufgaben:
+        flash(f'Status "{status.name}" wird noch von Aufgaben verwendet und kann nicht gelöscht werden.', 'danger')
+    else:
+        name = status.name
+        db.session.delete(status)
+        db.session.commit()
+        log_action("Löschen", f"Status '{name}' wurde gelöscht.")
+        flash(f'Status "{name}" wurde gelöscht.', 'success')
+    return redirect(url_for('settings'))
+
+@app.route('/settings/priority/delete/<int:prio_id>', methods=['POST'])
+@login_required
+@admin_required
+def delete_priority(prio_id):
+    prio = Prioritaet.query.get_or_404(prio_id)
+    if prio.einzelaufgaben:
+        flash(f'Priorität "{prio.name}" wird noch von Aufgaben verwendet und kann nicht gelöscht werden.', 'danger')
+    else:
+        name = prio.name
+        db.session.delete(prio)
+        db.session.commit()
+        log_action("Löschen", f"Priorität '{name}' wurde gelöscht.")
+        flash(f'Priorität "{name}" wurde gelöscht.', 'success')
+    return redirect(url_for('settings'))
+
+
+# --- Einzelaufgaben ---
+@app.route('/einzelaufgaben')
+@login_required
+def einzelaufgaben():
+    search_query = request.args.get('search', '')
+    status_filter = request.args.get('status', '')
+    prio_filter = request.args.get('prio', '')
+    sort_column = request.args.get('sort', 'datum_bis')
+    sort_dir = request.args.get('dir', 'asc')
+
+    query = Einzelaufgabe.query.filter_by(oe_number=current_user.oe_number)
+
+    if search_query:
+        search_term = f"%{search_query}%"
+        query = query.filter(or_(Einzelaufgabe.aufgabe.ilike(search_term), Einzelaufgabe.themenfeld.ilike(search_term)))
+    if status_filter:
+        query = query.filter(Einzelaufgabe.status_id == status_filter)
+    if prio_filter:
+        query = query.filter(Einzelaufgabe.prioritaet_id == prio_filter)
+
+    tasks = query.all()
+
+    for task in tasks:
+        total_assigned_hours = sum(zuordnung.stunden or 0 for zuordnung in task.mitarbeiter_zuordnung)
+        unassigned_stunden = (task.aufwand_stunden or 0) - total_assigned_hours
+        task.unassigned_pt = unassigned_stunden / 8
+
+    sort_reverse = (sort_dir == 'desc')
+    sort_key_map = {
+        'aufgabe': lambda t: t.aufgabe.lower(),
+        'themenfeld': lambda t: (t.themenfeld or '').lower(),
+        'status': lambda t: t.status.name.lower(),
+        'prioritaet': lambda t: (t.prioritaet.name if t.prioritaet else '').lower(),
+        'fertigstellungsgrad': lambda t: t.fertigstellungsgrad or 0,
+        'datum_bis': lambda t: t.datum_bis if t.datum_bis else date.max,
+        'aufwand_pt': lambda t: t.aufwand_pt or 0,
+        'unassigned_pt': lambda t: t.unassigned_pt
+    }
+
+    sort_key = sort_key_map.get(sort_column, sort_key_map['datum_bis'])
+    tasks.sort(key=sort_key, reverse=sort_reverse)
+    
+    stati = Status.query.order_by(Status.reihenfolge, Status.name).all()
+    priorities = Prioritaet.query.order_by(Prioritaet.reihenfolge, Prioritaet.name).all()
+    
+    return render_template('einzelaufgaben.html', tasks=tasks, stati=stati, priorities=priorities)
+
+@app.route('/einzelaufgaben/add', methods=['GET', 'POST'])
+@login_required
+def add_einzelaufgabe():
+    if request.method == 'POST':
+        try:
+            new_task = Einzelaufgabe(
+                themenfeld=request.form.get('themenfeld'),
+                aufgabe=request.form.get('aufgabe'),
+                datum_von=datetime.strptime(request.form['datum_von'], '%Y-%m-%d').date() if request.form.get('datum_von') else None,
+                datum_bis=datetime.strptime(request.form['datum_bis'], '%Y-%m-%d').date() if request.form.get('datum_bis') else None,
+                status_id=request.form.get('status_id'),
+                prioritaet_id=request.form.get('prioritaet_id') if request.form.get('prioritaet_id') else None,
+                fertigstellungsgrad=int(request.form.get('fertigstellungsgrad', 0)),
+                aufwand_stunden=float(request.form['aufwand_stunden']) if request.form.get('aufwand_stunden') else None,
+                aufwand_pt=float(request.form['aufwand_pt']) if request.form.get('aufwand_pt') else None,
+                oe_number=current_user.oe_number
+            )
+            db.session.add(new_task)
+            db.session.flush()
+
+            employees_in_oe = Employee.query.filter_by(oe_number=current_user.oe_number).all()
+            for emp in employees_in_oe:
+                stunden = request.form.get(f'stunden_emp_{emp.id}')
+                pt = request.form.get(f'pt_emp_{emp.id}')
+                if (stunden and float(stunden) > 0) or (pt and float(pt) > 0):
+                    zuordnung = EinzelaufgabeMitarbeiter(
+                        einzelaufgabe_id=new_task.id,
+                        employee_id=emp.id,
+                        stunden=float(stunden) if stunden else None,
+                        pt=float(pt) if pt else None
+                    )
+                    db.session.add(zuordnung)
+            
+            db.session.commit()
+            log_action("Erstellen", f"Neue Einzelaufgabe '{new_task.aufgabe}' wurde angelegt.")
+            flash('Neue Einzelaufgabe erfolgreich erstellt!', 'success')
+            return redirect(url_for('einzelaufgaben'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Fehler beim Erstellen der Aufgabe: {e}', 'danger')
+    
+    employees = Employee.query.filter_by(oe_number=current_user.oe_number).order_by(Employee.name).all()
+    stati = Status.query.order_by(Status.reihenfolge, Status.name).all()
+    priorities = Prioritaet.query.order_by(Prioritaet.reihenfolge, Prioritaet.name).all()
+    return render_template('add_einzelaufgabe.html', employees=employees, stati=stati, priorities=priorities)
+
+@app.route('/einzelaufgaben/edit/<int:task_id>', methods=['GET', 'POST'])
+@login_required
+def edit_einzelaufgabe(task_id):
+    task = Einzelaufgabe.query.get_or_404(task_id)
+    if task.oe_number != current_user.oe_number and not current_user.is_admin:
+        flash('Keine Berechtigung, diese Aufgabe zu bearbeiten.', 'danger')
+        return redirect(url_for('einzelaufgaben'))
+
+    if request.method == 'POST':
+        try:
+            task.themenfeld = request.form.get('themenfeld')
+            task.aufgabe = request.form.get('aufgabe')
+            task.datum_von = datetime.strptime(request.form['datum_von'], '%Y-%m-%d').date() if request.form.get('datum_von') else None
+            task.datum_bis = datetime.strptime(request.form['datum_bis'], '%Y-%m-%d').date() if request.form.get('datum_bis') else None
+            task.status_id = request.form.get('status_id')
+            task.prioritaet_id = request.form.get('prioritaet_id') if request.form.get('prioritaet_id') else None
+            task.fertigstellungsgrad = int(request.form.get('fertigstellungsgrad')) if request.form.get('fertigstellungsgrad') else 0
+            task.aufwand_stunden = float(request.form['aufwand_stunden']) if request.form.get('aufwand_stunden') else None
+            task.aufwand_pt = float(request.form['aufwand_pt']) if request.form.get('aufwand_pt') else None
+            
+            EinzelaufgabeMitarbeiter.query.filter_by(einzelaufgabe_id=task.id).delete()
+            employees_in_oe = Employee.query.filter_by(oe_number=task.oe_number).all()
+            for emp in employees_in_oe:
+                stunden = request.form.get(f'stunden_emp_{emp.id}')
+                pt = request.form.get(f'pt_emp_{emp.id}')
+                if (stunden and float(stunden) > 0) or (pt and float(pt) > 0):
+                    zuordnung = EinzelaufgabeMitarbeiter(
+                        einzelaufgabe_id=task.id,
+                        employee_id=emp.id,
+                        stunden=float(stunden) if stunden else None,
+                        pt=float(pt) if pt else None
+                    )
+                    db.session.add(zuordnung)
+
+            db.session.commit()
+            log_action("Bearbeiten", f"Einzelaufgabe '{task.aufgabe}' (ID: {task.id}) wurde aktualisiert.")
+            flash('Aufgabe erfolgreich aktualisiert!', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Fehler beim Aktualisieren der Aufgabe: {e}', 'danger')
+        return redirect(url_for('einzelaufgaben'))
+
+    task_oe_employees = Employee.query.filter_by(oe_number=task.oe_number).order_by(Employee.name).all()
+    stati = Status.query.order_by(Status.reihenfolge, Status.name).all()
+    priorities = Prioritaet.query.order_by(Prioritaet.reihenfolge, Prioritaet.name).all()
+    existing_assignments = {assignment.employee_id: assignment for assignment in task.mitarbeiter_zuordnung}
+    return render_template('edit_einzelaufgabe.html', task=task, employees=task_oe_employees, stati=stati, priorities=priorities, assignments=existing_assignments)
+
+@app.route('/einzelaufgaben/delete/<int:task_id>', methods=['POST'])
+@login_required
+def delete_einzelaufgabe(task_id):
+    task = Einzelaufgabe.query.get_or_404(task_id)
+    if task.oe_number != current_user.oe_number and not current_user.is_admin:
+        flash('Keine Berechtigung zum Löschen.', 'danger')
+        return redirect(url_for('einzelaufgaben'))
+    
+    aufgabe_name = task.aufgabe
+    db.session.delete(task)
+    db.session.commit()
+    log_action("Löschen", f"Einzelaufgabe '{aufgabe_name}' (ID: {task_id}) wurde gelöscht.")
+    flash('Einzelaufgabe erfolgreich gelöscht!', 'success')
+    return redirect(url_for('einzelaufgaben'))
+
+# --- Auslastungsanalyse ---
+@app.route('/auslastungsanalyse')
+@login_required
+def workload_analysis():
+    # 1. Standard-Zeitraum und Filter-Parameter abrufen
+    today = date.today()
+    default_start = (today - relativedelta(months=1)).replace(day=1)
+    future_month_end = (today + relativedelta(months=3)).replace(day=1) - timedelta(days=1)
+    default_end = future_month_end
+
+    try:
+        start_date_filter = datetime.strptime(request.args.get('start_date', default_start.strftime('%Y-%m-%d')), '%Y-%m-%d').date()
+        end_date_filter = datetime.strptime(request.args.get('end_date', default_end.strftime('%Y-%m-%d')), '%Y-%m-%d').date()
+    except ValueError:
+        flash("Ungültiges Datumsformat. Bitte YYYY-MM-DD verwenden.", "danger")
+        start_date_filter = default_start
+        end_date_filter = default_end
+    
+    search_term = request.args.get('search', '').lower()
+
+    # 2. Mitarbeiter abrufen und filtern
+    if current_user.is_admin:
+        employees_query = Employee.query
+        if search_term:
+            employees_query = employees_query.filter(
+                or_(
+                    Employee.name.ilike(f'%{search_term}%'),
+                    Employee.job_title.ilike(f'%{search_term}%'),
+                    Employee.team.ilike(f'%{search_term}%'),
+                    Employee.oe_number.ilike(f'%{search_term}%')
+                )
+            )
+    else:
+        employees_query = Employee.query.filter_by(oe_number=current_user.oe_number)
+        if search_term:
+            employees_query = employees_query.filter(
+                or_(
+                    Employee.name.ilike(f'%{search_term}%'),
+                    Employee.job_title.ilike(f'%{search_term}%'),
+                    Employee.team.ilike(f'%{search_term}%')
+                )
+            )
+            
+    employees = employees_query.order_by(Employee.oe_number, Employee.name).all()
+    employee_ids = [emp.id for emp in employees]
+    
+    # 3. Kalenderwochen für den Zeitraum generieren
+    calendar_weeks_data = []
+    if start_date_filter <= end_date_filter:
+        current_monday = start_date_filter - timedelta(days=start_date_filter.weekday())
+        while current_monday <= end_date_filter:
+            year, week, _ = current_monday.isocalendar()
+            month_name = current_monday.strftime('%B')
+            
+            calendar_weeks_data.append({
+                "week_str": f"KW {year}/{week:02d}",
+                "monday_date_str": current_monday.strftime('%d.%m.'),
+                "month_name": month_name,
+                "start_of_week": current_monday
+            })
+            current_monday += timedelta(weeks=1)
+
+    # 4. Aufgaben abrufen, die für die gefilterten Mitarbeiter relevant sind
+    tasks_query = Einzelaufgabe.query.join(EinzelaufgabeMitarbeiter).filter(
+        EinzelaufgabeMitarbeiter.employee_id.in_(employee_ids),
+        Einzelaufgabe.datum_von.isnot(None),
+        Einzelaufgabe.datum_bis.isnot(None),
+        Einzelaufgabe.datum_von <= end_date_filter,
+        Einzelaufgabe.datum_bis >= start_date_filter
+    )
+    tasks = tasks_query.all()
+
+    # 5. Analyse-Datenstruktur initialisieren
+    analysis_data = {emp.id: {week['week_str']: {'workload': 0.0, 'capacity': 0.0} for week in calendar_weeks_data} for emp in employees}
+    
+    # 6. Kapazität für jede Woche und jeden Mitarbeiter berechnen
+    for emp in employees:
+        for week_data in calendar_weeks_data:
+            week_start_date = week_data["start_of_week"]
+            latest_change = WorkingHoursChange.query.filter(
+                WorkingHoursChange.employee_id == emp.id,
+                WorkingHoursChange.change_date <= week_start_date
+            ).order_by(WorkingHoursChange.change_date.desc()).first()
+            analysis_data[emp.id][week_data['week_str']]['capacity'] = latest_change.new_hours if latest_change else 0.0
+
+    # 7. Workload berechnen und verteilen
+    for task in tasks:
+        assignments = [a for a in task.mitarbeiter_zuordnung if a.employee_id in employee_ids]
+        total_workdays_in_task = get_workdays(task.datum_von, task.datum_bis)
+        if total_workdays_in_task == 0:
+            continue
+
+        for assignment in assignments:
+            pt_per_workday = (assignment.pt or 0) / total_workdays_in_task
+            
+            current_date_in_loop = task.datum_von
+            while current_date_in_loop <= task.datum_bis:
+                if start_date_filter <= current_date_in_loop <= end_date_filter and current_date_in_loop.weekday() < 5:
+                    year, week, _ = current_date_in_loop.isocalendar()
+                    week_str = f"KW {year}/{week:02d}"
+                    if week_str in analysis_data.get(assignment.employee_id, {}):
+                        analysis_data[assignment.employee_id][week_str]['workload'] += pt_per_workday
+                current_date_in_loop += timedelta(days=1)
+    
+    # 8. Summen und Daten für JSON vorbereiten
+    employees_for_json = [{'id': emp.id, 'name': emp.name} for emp in employees]
+    summary_data = {week['week_str']: {'workload': 0.0, 'capacity': 0.0} for week in calendar_weeks_data}
+    for week_data in calendar_weeks_data:
+        week_str = week_data['week_str']
+        for emp in employees:
+            summary_data[week_str]['workload'] += analysis_data[emp.id][week_str]['workload']
+            summary_data[week_str]['capacity'] += analysis_data[emp.id][week_str]['capacity']
+
+    settings_db = Settings.query.first()
+    settings_for_json = {
+        'red_threshold': settings_db.red_threshold if settings_db else 100.1,
+        'green_min_threshold': settings_db.green_min_threshold if settings_db else 80.0
+    }
+
+    return render_template('workload_analysis.html', 
+                           employees=employees, 
+                           calendar_weeks_data=calendar_weeks_data, 
+                           analysis_data=analysis_data,
+                           summary_data=summary_data,
+                           employees_for_json=employees_for_json,
+                           start_date=start_date_filter.strftime('%Y-%m-%d'),
+                           end_date=end_date_filter.strftime('%Y-%m-%d'),
+                           search_term=search_term,
+                           settings=settings_for_json)

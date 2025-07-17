@@ -3,22 +3,106 @@
 {% block title %}Einstellungen{% endblock %}
 
 {% block content %}
-        <h1>Einstellungen für Prozent-Summen</h1>
-        <p>Definieren Sie die Schwellenwerte für die farbliche Hervorhebung der Gesamtprozentsätze der Mitarbeiter.</p>
-        <form method="POST">
-            <label for="green_min_threshold">Grün (ab diesem Wert, bis Rot-Grenze):</label>
-            <input type="number" id="green_min_threshold" name="green_min_threshold" min="0" max="100" step="0.1" value="{{ settings.green_min_threshold | default(80.0) }}" required>
-            <small>Werte zwischen diesem Wert (inklusive) und dem Rot-Schwellenwert (exklusive) werden grün dargestellt.</small>
+    <h1>Einstellungen</h1>
+    
+    <div style="display: flex; flex-wrap: wrap; gap: 20px;">
+        
+        <div style="flex: 1; min-width: 300px;">
+            <h2>Prozent-Summen Schwellenwerte</h2>
+            <form method="POST">
+                <label for="green_min_threshold">Grün (ab %):</label>
+                <input type="number" name="green_min_threshold" value="{{ settings.green_min_threshold | default(80.0) }}" required>
+                
+                <label for="yellow_max_threshold">Gelb (bis %):</label>
+                <input type="number" name="yellow_max_threshold" value="{{ settings.yellow_max_threshold | default(79.9) }}" required>
+
+                <label for="red_threshold">Rot (ab %):</label>
+                <input type="number" name="red_threshold" value="{{ settings.red_threshold | default(100.0) }}" required>
+
+                <button type="submit">Schwellenwerte speichern</button>
+            </form>
+        </div>
+
+        <div style="flex: 2; min-width: 400px;">
+            <h2>Auswahl-Optionen verwalten</h2>
             
-            <label for="yellow_max_threshold">Gelb (bis zu diesem Wert):</label>
-            <input type="number" id="yellow_max_threshold" name="yellow_max_threshold" min="0" max="100" step="0.1" value="{{ settings.yellow_max_threshold | default(79.9) }}" required>
-            <small>Werte unter diesem Wert (inklusive) werden gelb dargestellt.</small>
+            <form method="POST">
+                {# Status verwalten #}
+                <h3>Status für Einzelaufgaben</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Reihenfolge</th>
+                            <th>Name</th>
+                            <th>Aktion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in stati %}
+                        <tr>
+                            <td><input type="number" name="status_order_{{ s.id }}" value="{{ s.reihenfolge }}" style="width: 60px;"></td>
+                            <td>{{ s.name }}</td>
+                            <td>
+                                <a href="#" onclick="if(confirm('Soll dieser Status wirklich gelöscht werden?')) document.getElementById('delete-status-{{s.id}}').submit();" class="button small delete">Löschen</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                
+                <hr style="margin: 20px 0;">
 
-            <label for="red_threshold">Rot (ab diesem Wert):</label>
-            <input type="number" id="red_threshold" name="red_threshold" min="0" step="0.1" value="{{ settings.red_threshold | default(100.0) }}" required>
-            <small>Werte ab diesem Wert (inklusive) werden rot dargestellt.</small>
+                {# Priorität verwalten #}
+                <h3>Priorität für Einzelaufgaben</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Reihenfolge</th>
+                            <th>Name</th>
+                            <th>Aktion</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in priorities %}
+                        <tr>
+                            <td><input type="number" name="prio_order_{{ p.id }}" value="{{ p.reihenfolge }}" style="width: 60px;"></td>
+                            <td>{{ p.name }}</td>
+                            <td>
+                                <a href="#" onclick="if(confirm('Soll diese Priorität wirklich gelöscht werden?')) document.getElementById('delete-prio-{{p.id}}').submit();" class="button small delete">Löschen</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <button type="submit" name="save_order" value="1" style="margin-top: 20px;">Reihenfolge speichern</button>
+            </form>
+            
+            <hr style="margin: 30px 0;">
 
-            <button type="submit">Einstellungen speichern</button>
-        </form>
-        <p><a href="{{ url_for('index') }}">Zurück zur Startseite</a></p>
+            {# Neue Einträge hinzufügen #}
+            <div style="display: flex; gap: 20px;">
+                <form method="POST" style="flex: 1;">
+                    <label for="new_status_name">Neuen Status hinzufügen:</label>
+                    <input type="text" name="new_status_name" placeholder="Name" required>
+                    <input type="number" name="new_status_order" placeholder="Reihenfolge" value="0">
+                    <button type="submit">Status hinzufügen</button>
+                </form>
+                <form method="POST" style="flex: 1;">
+                    <label for="new_prio_name">Neue Priorität hinzufügen:</label>
+                    <input type="text" name="new_prio_name" placeholder="Name" required>
+                    <input type="number" name="new_prio_order" placeholder="Reihenfolge" value="0">
+                    <button type="submit">Priorität hinzufügen</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    {% for s in stati %}
+        <form id="delete-status-{{s.id}}" action="{{ url_for('delete_status', status_id=s.id) }}" method="POST" style="display:none;"></form>
+    {% endfor %}
+    {% for p in priorities %}
+         <form id="delete-prio-{{p.id}}" action="{{ url_for('delete_priority', prio_id=p.id) }}" method="POST" style="display:none;"></form>
+    {% endfor %}
+
+    <p style="margin-top: 30px;"><a href="{{ url_for('index') }}">Zurück zur Startseite</a></p>
 {% endblock %}

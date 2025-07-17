@@ -138,6 +138,10 @@ th {
     background-color: #077f01;
 }
 
+.button.edit {
+    background-color: #8e831b;
+}
+
 .button.delete:hover {
     background-color: #c82333;
 }

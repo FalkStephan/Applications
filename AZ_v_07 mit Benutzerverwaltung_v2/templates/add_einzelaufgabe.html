@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}Neue Einzelaufgabe anlegen{% endblock %}
+
+{% block head_extra_style %}
+<style>
+    .form-row {
+        display: flex;
+        gap: 20px; /* Abstand zwischen den Feldern */
+        margin-bottom: 15px; /* Abstand zur nächsten Zeile */
+    }
+    .form-group {
+        flex: 1; /* Sorgt dafür, dass die Gruppen den Platz gleichmäßig aufteilen */
+    }
+    .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: bold;
+    }
+    .form-group input, .form-group select, .form-group textarea {
+        width: 100%; /* Felder füllen den verfügbaren Platz im Container */
+        box-sizing: border-box; /* Stellt sicher, dass Padding und Border in der Breite enthalten sind */
+    }
+</style>
+{% endblock %}
+
+
+{% block content %}
+<h1>Neue Einzelaufgabe für OE: {{ current_user.oe_number }}</h1>
+
+<form method="POST" action="{{ url_for('add_einzelaufgabe') }}">
+    <fieldset>
+        <legend>Aufgabendetails</legend>
+
+        <div class="form-group" style="margin-bottom: 15px;">
+            <label for="themenfeld">Themenfeld (optional):</label>
+            <input type="text" id="themenfeld" name="themenfeld">
+        </div>
+
+        <div class="form-group" style="margin-bottom: 15px;">
+            <label for="aufgabe">Aufgabe (Pflichtfeld):</label>
+            <textarea id="aufgabe" name="aufgabe" rows="3" required></textarea>
+        </div>
+        
+        <div class="form-row">
+            <div class="form-group">
+                <label for="datum_von">Datum von:</label>
+                <input type="date" id="datum_von" name="datum_von">
+            </div>
+            <div class="form-group">
+                <label for="datum_bis">Datum bis:</label>
+                <input type="date" id="datum_bis" name="datum_bis">
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="status_id">Status (Pflichtfeld):</label>
+                <select id="status_id" name="status_id" required>
+                    {% for s in stati %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="prioritaet_id">Priorität (optional):</label>
+                <select id="prioritaet_id" name="prioritaet_id">
+                    <option value="">-- keine --</option>
+                    {% for p in priorities %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+                </select>
+            </div>
+        </div>
+
+    </fieldset>
+
+    <fieldset>
+        <legend>Aufwandschätzung (Gesamt)</legend>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="aufwand_stunden">Aufwand in Stunden:</label>
+                <input type="number" id="aufwand_stunden" name="aufwand_stunden" step="0.01" oninput="berechnePT(this.value); updateUnassigned();">
+            </div>
+            <div class="form-group">
+                <label for="aufwand_pt">Aufwand in Personentagen (PT):</label>
+                <input type="number" id="aufwand_pt" name="aufwand_pt" step="0.01" oninput="berechneStunden(this.value); updateUnassigned();">
+            </div>
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Aufwandsverteilung pro Mitarbeiter (optional)</legend>
+        <table>
+            <thead>
+                <tr>
+                    <th>Mitarbeiter</th>
+                    <th>Stunden</th>
+                    <th>PT</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for emp in employees %}
+                <tr>
+                    <td>{{ emp.name }}</td>
+                    <td><input type="number" step="0.01" name="stunden_emp_{{ emp.id }}" id="stunden_emp_{{ emp.id }}" oninput="berechnePTEmp({{ emp.id }}, this.value); updateUnassigned();"></td>
+                    <td><input type="number" step="0.01" name="pt_emp_{{ emp.id }}" id="pt_emp_{{ emp.id }}" oninput="berechneStundenEmp({{ emp.id }}, this.value); updateUnassigned();"></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                    <td>Nicht zugeordnet</td>
+                    <td><input type="text" id="unassigned_stunden" readonly></td>
+                    <td><input type="text" id="unassigned_pt" readonly></td>
+                </tr>
+            </tfoot>
+        </table>
+    </fieldset>
+
+    <button type="submit">Aufgabe erstellen</button>
+    <a href="{{ url_for('einzelaufgaben') }}" class="button">Abbrechen</a>
+</form>
+{% endblock %}
+
+{% block extra_script %}
+<script>
+    function updateUnassigned() {
+        let totalStunden = parseFloat(document.getElementById('aufwand_stunden').value) || 0;
+        let zugewieseneStunden = 0;
+        
+        const employeeInputs = document.querySelectorAll('input[name^="stunden_emp_"]');
+        employeeInputs.forEach(function(input) {
+            zugewieseneStunden += parseFloat(input.value) || 0;
+        });
+
+        const unassignedStunden = totalStunden - zugewieseneStunden;
+        const unassignedPT = unassignedStunden / 8;
+
+        document.getElementById('unassigned_stunden').value = unassignedStunden.toFixed(2);
+        document.getElementById('unassigned_pt').value = unassignedPT.toFixed(2);
+    }
+
+    function berechnePT(stunden) {
+        document.getElementById('aufwand_pt').value = (parseFloat(stunden) / 8).toFixed(2);
+    }
+    function berechneStunden(pt) {
+        document.getElementById('aufwand_stunden').value = (parseFloat(pt) * 8).toFixed(2);
+    }
+    function berechnePTEmp(empId, stunden) {
+        document.getElementById('pt_emp_' + empId).value = (parseFloat(stunden) / 8).toFixed(2);
+    }
+    function berechneStundenEmp(empId, pt) {
+        document.getElementById('stunden_emp_' + empId).value = (parseFloat(pt) * 8).toFixed(2);
+    }
+
+    document.addEventListener('DOMContentLoaded', updateUnassigned);
+</script>
+{% endblock %}

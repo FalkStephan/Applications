@@ -17,6 +17,8 @@
                 <li><a href="{{ url_for('working_hours_changes') }}">Wochenarbeitszeit ändern</a></li>
                 <li><a href="{{ url_for('department_tasks') }}">Abteilungsaufgaben verwalten</a></li>
                 <li><a href="{{ url_for('assign_tasks') }}">Aufgaben zuordnen</a></li>
+                <li><a href="{{ url_for('einzelaufgaben') }}">Einzelaufgaben verwalten</a></li>
+                <li><a href="{{ url_for('workload_analysis') }}">Auslastungsanalyse</a></li>
                 {% if current_user.is_admin %}
                     <hr>
                     <li><a href="{{ url_for('holidays') }}">Feiertage verwalten</a></li>                    

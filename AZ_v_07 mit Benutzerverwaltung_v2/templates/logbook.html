@@ -2,16 +2,64 @@
 
 {% block title %}Logbuch{% endblock %}
 
+{% block head_extra_style %}
+    <style>
+        .search-container {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .search-container input {
+            padding: 8px;
+            width: 50%;
+            max-width: 400px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .sortable-header {
+            cursor: pointer;
+            position: relative;
+            padding-right: 20px;
+        }
+        .sortable-header::after {
+            content: '';
+            display: inline-block;
+            position: absolute;
+            right: 5px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            vertical-align: middle;
+        }
+        .sortable-header.asc::after {
+            border-bottom: 5px solid #000;
+        }
+        .sortable-header.desc::after {
+            border-top: 5px solid #000;
+        }
+        .sortable-header:not(.asc):not(.desc):hover::after {
+            border-bottom: 5px solid #aaa;
+        }
+    </style>
+{% endblock %}
+
 {% block content %}
     <h1>Logbuch der Datenbankänderungen</h1>
     <p>Hier werden alle Änderungen an der Datenbank protokolliert.</p>
 
+    <div class="search-container">
+        <input type="text" id="logbookSearch" onkeyup="filterTable()" placeholder="Suchen in Zeit, Benutzer, Aktion, Beschreibung...">
+    </div>
+
     <table id="logbookTable">
         <thead>
             <tr>
-                <th>Zeitstempel (UTC)</th>
-                <th>Benutzer</th>
-                <th>Aktion</th>
+                <th class="sortable-header" data-column="timestamp">Zeitstempel (UTC)</th>
+                <th class="sortable-header" data-column="user">Benutzer</th>
+                <th class="sortable-header" data-column="action">Aktion</th>
                 <th>Beschreibung</th>
             </tr>
         </thead>
@@ -21,7 +69,7 @@
                 <td>{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                 <td>{{ log.username }}</td>
                 <td><span class="button small 
-                    {% if log.action == 'Erstellen' %}create{% elif log.action == 'Löschen' %}delete{% else %}edit-btn{% endif %}">
+                    {% if log.action == 'Erstellen' %}create{% elif log.action == 'Löschen' %}delete{% elif log.action == 'Bearbeiten' %}edit{%  else %}edit-btn{% endif %}">
                     {{ log.action }}
                     </span>
                 </td>
@@ -45,4 +93,83 @@
             <a href="{{ url_for('logbook', page=logs.next_num) }}" class="button">Ältere &raquo;</a>
         {% endif %}
     </div>
+{% endblock %}
+
+{% block extra_script %}
+<script>
+    let currentSortColumn = null;
+    let currentSortDirection = 'asc';
+
+    function filterTable() {
+        const input = document.getElementById('logbookSearch');
+        const filter = input.value.toLowerCase();
+        const table = document.getElementById('logbookTable');
+        const tr = table.getElementsByTagName('tr');
+
+        for (let i = 1; i < tr.length; i++) { // Start bei 1, um die Kopfzeile zu überspringen
+            const cells = tr[i].getElementsByTagName('td');
+            let found = false;
+            for (let j = 0; j < cells.length; j++) {
+                const cell = cells[j];
+                if (cell) {
+                    const cellText = cell.textContent || cell.innerText;
+                    if (cellText.toLowerCase().indexOf(filter) > -1) {
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (found) {
+                tr[i].style.display = '';
+            } else {
+                tr[i].style.display = 'none';
+            }
+        }
+    }
+
+    function sortTable(columnIndex) {
+        const table = document.getElementById('logbookTable');
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.rows);
+        const header = table.getElementsByTagName('th')[columnIndex];
+
+        document.querySelectorAll('.sortable-header').forEach(th => {
+            th.classList.remove('asc', 'desc');
+        });
+
+        if (currentSortColumn === columnIndex) {
+            currentSortDirection = (currentSortDirection === 'asc') ? 'desc' : 'asc';
+        } else {
+            currentSortColumn = columnIndex;
+            currentSortDirection = 'asc';
+        }
+
+        header.classList.add(currentSortDirection);
+
+        rows.sort((rowA, rowB) => {
+            let cellA = rowA.cells[columnIndex].textContent.trim().toLowerCase();
+            let cellB = rowB.cells[columnIndex].textContent.trim().toLowerCase();
+
+            let comparison = 0;
+            if (cellA > cellB) {
+                comparison = 1;
+            } else if (cellA < cellB) {
+                comparison = -1;
+            }
+
+            return currentSortDirection === 'asc' ? comparison : -comparison;
+        });
+
+        rows.forEach(row => tbody.appendChild(row));
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const headers = document.querySelectorAll('.sortable-header');
+        headers.forEach((header, index) => {
+            header.addEventListener('click', () => {
+                sortTable(index);
+            });
+        });
+    });
+</script>
 {% endblock %}

@@ -1,0 +1,350 @@
+{% extends "base.html" %}
+
+{% block title %}Auslastungsanalyse{% endblock %}
+
+{% block head_extra_style %}
+<style>
+    .filter-bar, .radio-bar, .checkbox-bar {
+        display: flex; flex-wrap: wrap; gap: 15px; align-items: center; padding: 15px;
+        background-color: #f8f9fa; border-radius: 5px; margin-bottom: 10px;
+    }
+    .radio-bar { gap: 20px; background-color: #e9ecef; }
+    .checkbox-bar { background-color: #f1f3f5; margin-bottom: 20px; }
+    .form-group { display: flex; flex-direction: column; }
+    .filter-bar label, .radio-bar label, .checkbox-bar label {
+        margin-bottom: 5px; font-size: 0.9em; font-weight: bold;
+    }
+    .radio-bar label, .checkbox-bar label { font-weight: normal; flex-direction: row; align-items: center; }
+    .workload-table-container { overflow-x: auto; border: 1px solid #ddd; max-height: 70vh; }
+    .workload-table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+    .workload-table th, .workload-table td {
+        border: 1px solid #ddd; padding: 8px; text-align: center; min-width: 150px;
+    }
+    .workload-table thead th { background-color: #e9ecef; position: sticky; top: 0; z-index: 2; }
+    
+    .workload-table th:first-child, .workload-table td:first-child {
+        position: sticky; left: 0; z-index: 1; min-width: 150px; background-color: #f8f9fa;
+    }
+    .workload-table thead th:first-child { z-index: 3; background-color: #dee2e6; }
+    .workload-table tbody td { background-color: #fff; }
+
+    .workload-table th:last-child, .workload-table td:last-child {
+        position: sticky; right: 0; z-index: 1; background-color: #e9ecef; font-weight: bold;
+    }
+    .workload-table thead th:last-child { z-index: 3; }
+    .workload-table tbody td:last-child { background-color: #f8f9fa; }
+
+    .capacity-cell div { display: none; }
+    .capacity-cell { font-size: 0.9em; transition: background-color 0.3s ease; }
+    .week-header-main { font-weight: bold; }
+    .week-header-sub { font-size: 0.8em; color: #555; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Auslastungsanalyse
+    {% if not current_user.is_admin %}
+        für OE: {{ current_user.oe_number }}
+    {% endif %}
+</h1>
+
+<div class="view-toggle-bar">
+    <button id="toggleViewBtn" class="button">Grafikansicht</button>
+</div>
+
+<form id="filterForm" method="get" class="filter-bar">
+    <div class="form-group">
+        <label for="search">Suchen:</label>
+        <input type="text" name="search" id="search" 
+               placeholder="{% if current_user.is_admin %}Mitarbeiter, Stelle, Team, OE...{% else %}Mitarbeiter, Stelle, Team...{% endif %}" 
+               value="{{ search_term }}">
+    </div>
+    <div class="form-group">
+        <label for="start_date">Auswertung von:</label>
+        <input type="date" name="start_date" id="start_date" value="{{ start_date }}">
+    </div>
+    <div class="form-group">
+        <label for="end_date">Auswertung bis:</label>
+        <input type="date" name="end_date" id="end_date" value="{{ end_date }}">
+    </div>
+    <div class="form-group" style="align-self: flex-end;">
+        <a href="{{ url_for('workload_analysis') }}" class="button">Filter zurücksetzen</a>
+    </div>
+</form>
+
+<div class="radio-bar">
+    <strong>Einfärben nach:</strong>
+    <label><input type="radio" name="color_metric" class="color-metric-toggle" value="utilization_perc" checked> Auslastung (%)</label>
+    <label><input type="radio" name="color_metric" class="color-metric-toggle" value="free_perc"> Frei (%)</label>
+    <label><input type="radio" name="color_metric" class="color-metric-toggle" value="none"> Keine Einfärbung</label>
+</div>
+
+<div class="checkbox-bar">
+    <strong>Angezeigte Werte:</strong>
+    <label><input type="checkbox" class="view-toggle" data-target="show-capacity" checked> Kapazität (PT)</label>
+    <label><input type="checkbox" class="view-toggle" data-target="show-workload" checked> Auslastung (PT)</label>
+    <label><input type="checkbox" class="view-toggle" data-target="show-utilization" checked> Auslastung (%)</label>
+    <label><input type="checkbox" class="view-toggle" data-target="show-free-abs" checked> Frei (PT)</label>
+    <label><input type="checkbox" class="view-toggle" data-target="show-free-perc"> Frei (%)</label>
+</div>
+
+<div id="tableContainer">
+    <div class="workload-table-container">
+        <table class="workload-table">
+            <thead>
+                <tr>
+                    <th>Zeitraum</th>
+                    {% for employee in employees %}
+                    <th>
+                        {{ employee.name }}
+                        {% if current_user.is_admin %}
+                            <div class="week-header-sub" style="color: #0056b3;">{{ employee.oe_number }}</div>
+                        {% endif %}
+                    </th>
+                    {% endfor %}
+                    <th>Summe</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for week_data in calendar_weeks_data %}
+                <tr>
+                    <th>
+                        <div class="week-header-main">{{ week_data.week_str }}</div>
+                        <div class="week-header-sub">{{ week_data.month_name }}</div>
+                        <div class="week-header-sub">{{ week_data.monday_date_str }}</div>
+                    </th>
+                    
+                    {% for employee in employees %}
+                        {% set data = analysis_data[employee.id][week_data.week_str] %}
+                        {% set capacity = data.capacity %}
+                        {% set workload = data.workload %}
+                        {% set free_capacity = capacity - workload %}
+                        {% if capacity > 0 %}
+                            {% set utilization = (workload / capacity) * 100 %}
+                            {% set free_percent = 100 - utilization %}
+                        {% else %}
+                            {% set utilization = 0 %}
+                            {% set free_percent = 0 %}
+                        {% endif %}
+                        
+                        <td class="capacity-cell" 
+                            data-capacity="{{ capacity }}"
+                            data-workload="{{ workload }}"
+                            data-utilization-perc="{{ utilization|round|int }}"
+                            data-free-abs="{{ free_capacity }}"
+                            data-free-perc="{{ free_percent|round|int }}">
+                            <div class="show-capacity">Kap: {{ "%.2f"|format(capacity) }}</div>
+                            <div class="show-workload">Ausl: {{ "%.2f"|format(workload) }}</div>
+                            <div class="show-utilization">Ausl: {{ "%.0f"|format(utilization) }}%</div>
+                            <div class="show-free-abs">Frei: {{ "%.2f"|format(free_capacity) }}</div>
+                            <div class="show-free-perc">Frei: {{ "%.0f"|format(free_percent) }}%</div>
+                        </td>
+                    {% endfor %}
+
+                    {% set summary = summary_data[week_data.week_str] %}
+                    {% set capacity = summary.capacity %}
+                    {% set workload = summary.workload %}
+                    {% set free_capacity = capacity - workload %}
+                    {% if capacity > 0 %}
+                        {% set utilization = (workload / capacity) * 100 %}
+                        {% set free_percent = 100 - utilization %}
+                    {% else %}
+                        {% set utilization = 0 %}
+                        {% set free_percent = 0 %}
+                    {% endif %}
+                    <td class="capacity-cell"
+                        data-capacity="{{ capacity }}"
+                        data-workload="{{ workload }}"
+                        data-utilization-perc="{{ utilization|round|int }}"
+                        data-free-abs="{{ free_capacity }}"
+                        data-free-perc="{{ free_percent|round|int }}">
+                        <div class="show-capacity">Kap: {{ "%.2f"|format(capacity) }}</div>
+                        <div class="show-workload">Ausl: {{ "%.2f"|format(workload) }}</div>
+                        <div class="show-utilization">Ausl: {{ "%.0f"|format(utilization) }}%</div>
+                        <div class="show-free-abs">Frei: {{ "%.2f"|format(free_capacity) }}</div>
+                        <div class="show-free-perc">Frei: {{ "%.0f"|format(free_percent) }}%</div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="{{ 2 + employees|length }}">Keine Daten für den ausgewählten Zeitraum gefunden.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div id="chartContainer" style="display: none;">
+    <canvas id="workloadChart"></canvas>
+</div>
+
+{% endblock %}
+
+{% block extra_script %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // ---- Automatisches Filtern ----
+    const filterForm = document.getElementById('filterForm');
+    const searchInput = document.getElementById('search');
+    const startDateInput = document.getElementById('start_date');
+    const endDateInput = document.getElementById('end_date');
+
+    let debounceTimer;
+    function submitForm() { filterForm.submit(); }
+    searchInput.addEventListener('keyup', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(submitForm, 500); });
+    startDateInput.addEventListener('change', submitForm);
+    endDateInput.addEventListener('change', submitForm);
+
+    // ---- Checkbox-Logik für die Anzeige ----
+    const toggles = document.querySelectorAll('.view-toggle');
+    const table = document.querySelector('.workload-table');
+
+    function updateView() {
+        toggles.forEach(toggle => {
+            const targetClass = '.' + toggle.dataset.target;
+            const isChecked = toggle.checked;
+            localStorage.setItem(toggle.dataset.target, isChecked);
+            if (table) {
+                table.querySelectorAll(targetClass).forEach(el => {
+                    el.style.display = isChecked ? 'block' : 'none';
+                });
+            }
+        });
+    }
+
+    toggles.forEach(toggle => {
+        const storedState = localStorage.getItem(toggle.dataset.target);
+        toggle.checked = storedState !== 'false';
+        toggle.addEventListener('change', updateView);
+    });
+    
+    // ---- Radio-Button-Logik für die Einfärbung ----
+    const colorToggles = document.querySelectorAll('.color-metric-toggle');
+    const redThreshold = {{ settings.red_threshold|default(100.1) }};
+    const greenMinThreshold = {{ settings.green_min_threshold|default(80.0) }};
+
+    function applyColoring() {
+        const metric = document.querySelector('input[name="color_metric"]:checked').value;
+        localStorage.setItem('colorMetric', metric);
+
+        document.querySelectorAll('.capacity-cell').forEach(cell => {
+            let color = '#fff';
+            if (cell.parentElement.querySelector('th') === cell) {
+                 color = '#f8f9fa';
+            } else if (cell.matches(':last-child')) {
+                color = '#f8f9fa';
+            }
+
+
+            if (metric === 'none') {
+                // Nichts tun, Standardfarbe behalten
+            } else if (metric === 'utilization_perc') {
+                const value = parseFloat(cell.dataset.utilizationPerc);
+                if (value >= redThreshold) {
+                    color = 'rgba(220, 53, 69, 0.6)';
+                } else if (value >= greenMinThreshold) {
+                    color = 'rgba(40, 167, 69, 0.6)';
+                } else {
+                    color = 'rgba(255, 193, 7, 0.6)';
+                }
+            } else if (metric === 'free_perc') {
+                 const value = parseFloat(cell.dataset.freePerc);
+                 if (value < (100 - redThreshold)) {
+                     color = 'rgba(220, 53, 69, 0.6)';
+                 } else if (value < (100 - greenMinThreshold)) {
+                     color = 'rgba(255, 193, 7, 0.6)';
+                 } else {
+                     color = 'rgba(40, 167, 69, 0.6)';
+                 }
+            }
+            cell.style.backgroundColor = color;
+        });
+    }
+
+    colorToggles.forEach(toggle => {
+        toggle.addEventListener('change', applyColoring);
+    });
+
+    const savedMetric = localStorage.getItem('colorMetric');
+    if (savedMetric) {
+        const savedRadio = document.querySelector(`input[name="color_metric"][value="${savedMetric}"]`);
+        if (savedRadio) savedRadio.checked = true;
+    }
+
+    // ---- Logik für Grafikansicht ----
+    const toggleViewBtn = document.getElementById('toggleViewBtn');
+    const tableContainer = document.getElementById('tableContainer');
+    const chartContainer = document.getElementById('chartContainer');
+    let myChart = null;
+
+    toggleViewBtn.addEventListener('click', () => {
+        const isTableVisible = tableContainer.style.display !== 'none';
+        if (isTableVisible) {
+            tableContainer.style.display = 'none';
+            chartContainer.style.display = 'block';
+            toggleViewBtn.textContent = 'Tabellenansicht';
+            if (!myChart) {
+                createWorkloadChart();
+            }
+        } else {
+            tableContainer.style.display = 'block';
+            chartContainer.style.display = 'none';
+            toggleViewBtn.textContent = 'Grafikansicht';
+        }
+    });
+
+    function createWorkloadChart() {
+        const ctx = document.getElementById('workloadChart').getContext('2d');
+        const labels = {{ calendar_weeks_data | map(attribute='week_str') | list | tojson }};
+        const employees = {{ employees_for_json | tojson }};
+        const analysisData = {{ analysis_data | tojson }};
+        const summaryData = {{ summary_data | tojson }};
+
+        const employeeColors = employees.map((emp, index) => {
+            const hue = (index * (360 / (employees.length || 1))) % 360;
+            return `hsl(${hue}, 70%, 60%)`;
+        });
+        
+        const datasets = employees.map((employee, index) => {
+            return {
+                label: employee.name,
+                data: labels.map(week => analysisData[employee.id][week].workload.toFixed(2)),
+                backgroundColor: employeeColors[index],
+            };
+        });
+
+        datasets.push({
+            label: 'Gesamtkapazität (PT)',
+            data: labels.map(week => summaryData[week].capacity.toFixed(2)),
+            type: 'line',
+            borderColor: 'rgb(255, 99, 132)',
+            backgroundColor: 'rgba(255, 99, 132, 0.5)',
+            fill: false,
+            tension: 0.1
+        });
+
+        myChart = new Chart(ctx, {
+            type: 'bar',
+            data: { labels: labels, datasets: datasets },
+            options: {
+                plugins: {
+                    title: { display: true, text: 'Wöchentliche Auslastung vs. Kapazität in Personentagen (PT)' },
+                    tooltip: { mode: 'index' },
+                },
+                responsive: true,
+                scales: {
+                    x: { stacked: true },
+                    y: { stacked: true, title: { display: true, text: 'Personentage (PT)' } }
+                }
+            }
+        });
+    }
+
+    // Initiale Ansicht und Färbung beim ersten Laden setzen
+    updateView();
+    applyColoring();
+});
+</script>
+{% endblock %}
