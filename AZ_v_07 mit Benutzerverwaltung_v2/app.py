@@ -636,6 +636,7 @@ def einzelaufgaben():
     for task in tasks:
         total_assigned_hours = sum(zuordnung.stunden or 0 for zuordnung in task.mitarbeiter_zuordnung)
         unassigned_stunden = (task.aufwand_stunden or 0) - total_assigned_hours
+        task.unassigned_stunden = unassigned_stunden
         task.unassigned_pt = unassigned_stunden / 8
 
     sort_reverse = (sort_dir == 'desc')
