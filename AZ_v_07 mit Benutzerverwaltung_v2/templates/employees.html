@@ -48,7 +48,7 @@
 {% endblock %}
 
 {% block content %}
-    <h1>Mitarbeiter</h1>
+    <h1>Mitarbeiter verwalten</h1>
     <a href="{{ url_for('add_employee') }}" class="button">Mitarbeiter hinzufügen</a>
 
     <div class="search-container">
@@ -74,7 +74,7 @@
                 <td>{{ employee.oe_number }}</td>
                 <td>
                     <a href="{{ url_for('edit_employee', employee_id=employee.id) }}" class="button small">Bearbeiten</a>
-                    <form action="{{ url_for('delete_employee', employee_id=employee.id) }}" method="post" style="display:inline;">
+                    <form action="{{ url_for('delete_employee', employee_id=employee.id) }}" method="post" style="display:inline; background:none; border:none; padding:0; margin:0;" onsubmit="return confirm('Sind Sie sicher, dass Sie diesen Mitarbeiter löschen möchten?');">
                         <button type="submit" class="button small delete">Löschen</button>
                     </form>
                 </td>

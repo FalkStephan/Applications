@@ -43,7 +43,7 @@
                             <td><input type="number" name="status_order_{{ s.id }}" value="{{ s.reihenfolge }}" style="width: 60px;"></td>
                             <td>{{ s.name }}</td>
                             <td>
-                                <a href="#" onclick="if(confirm('Soll dieser Status wirklich gelöscht werden?')) document.getElementById('delete-status-{{s.id}}').submit();" class="button small delete">Löschen</a>
+                                <a href="#" onclick="if(confirm('Soll dieser Status wirklich gelöscht werden?')) document.getElementById('delete-status-{{s.id}}').submit(); return false;" class="button small delete">Löschen</a>
                             </td>
                         </tr>
                         {% endfor %}
@@ -68,7 +68,7 @@
                             <td><input type="number" name="prio_order_{{ p.id }}" value="{{ p.reihenfolge }}" style="width: 60px;"></td>
                             <td>{{ p.name }}</td>
                             <td>
-                                <a href="#" onclick="if(confirm('Soll diese Priorität wirklich gelöscht werden?')) document.getElementById('delete-prio-{{p.id}}').submit();" class="button small delete">Löschen</a>
+                                <a href="#" onclick="if(confirm('Soll diese Priorität wirklich gelöscht werden?')) document.getElementById('delete-prio-{{p.id}}').submit(); return false;" class="button small delete">Löschen</a>
                             </td>
                         </tr>
                         {% endfor %}
